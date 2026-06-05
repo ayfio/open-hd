@@ -137,14 +137,30 @@ OAuth upstream, so SPA identity and MCP identity are one user.
 | `get_descriptions({gates?, channels?})` | Interpretive text so the AI explains in plain language, not bare codes |
 | `save_person(...)` / `delete_person(...)` | Write scope, **off by default** |
 
-Two design rules with teeth:
+Three design rules with teeth:
 - **`ai_access` is enforced in the query**, not the prompt: MCP tools can only see rows
   the user explicitly flagged. "Your AI sees exactly what you granted" is a database
   guarantee, not a policy claim.
-- **Tool contract lives in natalengine** (target: 1.3.0): the engine already ships a local
-  stdio MCP; extracting shared tool *definitions* lets the local server, this hosted
-  server, and any third-party natalengine app expose the identical AI surface. The hosted
-  Worker imports the *calculators* directly (not the stdio entry).
+- **The engine stays a pure math library; the MCP lives in the product.** (Decision
+  2026-06-04, reversing an earlier draft.) natalengine = calculators + data tables,
+  deterministic, zero I/O — the thing others build on. The MCP server knows about users,
+  people, and `ai_access`, so it belongs here in the Worker, which imports the engine's
+  *calculators* directly (never the stdio entry). Longer-term, the engine should get
+  *lighter*: the stdio MCP bin stays as a demo, but `storage/profiles.js`-style product
+  features migrate up into apps. Anyone wanting their own MCP wraps the library in ~50
+  lines, as we do.
+- **One-shot tools.** Each tool answers a whole human intent in one call — `get_chart`
+  inlines the relevant interpretive text so the AI rarely needs a follow-up. Fewer
+  round-trips = better answers, less context burn, and fair metering (below).
+
+### Multi-system from day one (the suite question, deferred correctly)
+
+The people store is system-agnostic (birth data only) and the engine already computes
+Western astrology, Vedic, and Gene Keys. So the MCP exposes `calculate_astrology` /
+`gene_keys_profile` etc. nearly for free, making the *AI surface* multi-system before any
+second app exists. Product strategy: **OpenHD stays the focused best-in-class HD app**
+(the open competitive lane per RESEARCH.md); future astrology/Gene Keys apps would be new
+frontends on this same Worker — same accounts, same people, same MCP.
 
 ### Privacy ladder (honest by construction)
 
@@ -158,6 +174,57 @@ don't pretend. The ladder, stated plainly in the UI:
 3. **AI Access (per person)**: "Lets your connected AI compute this person's charts."
 4. *(Phase 5, optional)*: true-E2E "sync without AI" tier — passphrase, AES-256-GCM,
    server stores ciphertext — for privacy maximalists, mutually exclusive with MCP.
+
+## Pricing (decided 2026-06-04)
+
+**$3/month or $20/year** — for the cloud, never the app.
+
+| | Anonymous | Free account | Paid |
+|---|---|---|---|
+| The app (charts, transits, connection, team) | ✅ unlimited forever | ✅ | ✅ |
+| Local saves (device) | ✅ unlimited | ✅ unlimited | ✅ unlimited |
+| Synced people | — | 10 | unlimited |
+| MCP/API chart-units | — | 50/mo | unlimited (fair use) |
+
+- **Metering counts chart-units, not raw calls.** Navigational/metadata tools are free
+  (`list_people`, `get_descriptions`, search); only chart-computing tools cost 1 unit
+  (`get_chart`, `compute_chart`, `compare` = 1, `transits`, `team`). With one-shot tool
+  design, "pull up Mom's chart" = exactly 1 unit. User-facing language: *"a query ≈ one
+  chart."* Implementation: a monthly counter column in D1.
+- Rationale: the market hates paywalls (RESEARCH.md §1.3); we charge only for what runs
+  on our servers. Annual ($20) keeps Stripe fees ~4% (vs ~33% at $1/mo). Infra floor is
+  $5/mo → subscriber #3 makes the platform self-sustaining. Compute is not a cost factor:
+  a full chart + gene keys benchmarks at **0.9ms** of Worker CPU.
+
+## Brand & domain architecture (decided 2026-06-04)
+
+- **Consumer apps get specialty domains.** This app: `openhumandesign.com` (checked
+  available 2026-06-04 — register in the same Cloudflare account that runs the Worker).
+  Future astrology/Gene Keys frontends get their own names. Specialty positioning wins
+  (RESEARCH.md); an umbrella consumer brand would dilute it.
+- **The platform stays quiet on `natalengine.com`** (already owned): OAuth at
+  `accounts.natalengine.com`, MCP at `mcp.natalengine.com`. The MCP connector name users
+  see in Claude is deliberately multi-system: *NatalEngine — your people's charts, any
+  system*. When app #2 arrives, "sign in with your NatalEngine account" is the whole
+  cross-app story.
+- **Naming caution:** the bare "OpenHD" shorthand collides with an established FOSS
+  project (OpenHD, drone video — openhdfpv.org). Use the full "Open Human Design"
+  wordmark; don't tattoo the abbreviation. (The name itself is still being felt out —
+  the positioning below survives a rename.)
+
+### Earning "Open"
+
+1. **Open knowledge** — the deepest claim: HD has been IP-gatekept for 30 years; giving
+   away the paywalled depth in original language is an open-access stance toward the
+   system itself (legally grounded — 2020 Florence ruling, 17 USC 102(b)).
+2. **Open data** — local-first default, export/import, shareable URLs, only birth data
+   ever stored, trivially portable.
+3. **Open interface** — the MCP/API contract is public; we charge for hosting, not access
+   to the interface.
+4. **Open engine** — natalengine is MIT on npm; competing frontends welcome.
+5. **Self-hosting as credible exit** — the static app runs with the backend env unset,
+   forever. HD users mostly won't self-host; the point is the *guarantee* (our cloud must
+   earn its keep), not the practice.
 
 ## Build phases
 
@@ -193,5 +260,9 @@ is Parachute Computer's thesis in miniature. OpenHD should ship standalone (clea
 open-source story, no dependency on Parachute's maturity), **but** the `PeopleStore`
 interface and the MCP tool contract are the two seams where a Parachute-vault-backed
 implementation could swap in later: people as vault documents, AI access via hub-minted
-scoped tokens. Design decision: keep both contracts storage-agnostic; revisit after
-Parachute multi-tenant onboarding is consumer-ready.
+scoped tokens. Design decision: keep both contracts storage-agnostic.
+
+**Convergence milestone:** when Parachute has consumer-grade multi-tenant onboarding,
+OpenHD accounts can become Parachute vaults — and OpenHD becomes Parachute's first
+consumer showcase app. Until then, D1 is the boring, correct choice; nothing built now
+is thrown away in that future (the Worker swaps its storage adapter).
