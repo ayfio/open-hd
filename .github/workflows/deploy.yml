@@ -1,0 +1,75 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout app
+        uses: actions/checkout@v4
+        with:
+          path: open-human-design
+
+      # natalengine is consumed as file:../natal-engine until the npm
+      # release catches up — check out the sibling repo the same way
+      # local development expects it.
+      - name: Checkout natal-engine
+        uses: actions/checkout@v4
+        with:
+          repository: Unforced-Dev/natal-engine
+          path: natal-engine
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install engine dependencies
+        working-directory: natal-engine
+        run: npm install
+
+      - name: Run engine tests
+        working-directory: natal-engine
+        run: npm test
+
+      - name: Install app dependencies
+        working-directory: open-human-design
+        run: npm install
+
+      - name: Run app tests
+        working-directory: open-human-design
+        run: |
+          if ls tests/*.test.js >/dev/null 2>&1; then npm test; else echo "no app tests yet"; fi
+
+      - name: Build
+        working-directory: open-human-design
+        run: npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: open-human-design/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
