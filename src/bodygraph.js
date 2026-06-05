@@ -1,213 +1,360 @@
 /**
- * Interactive Bodygraph Renderer for Bodygraph App
+ * Interactive Bodygraph Renderer
  *
- * Renders an SVG bodygraph with:
- * - Defined/undefined centers
- * - Active gate paths colored by activation type
- * - Gate labels with hover tooltips
- * - Click-to-expand gate details
+ * Renders the canonical Human Design bodygraph:
+ * - Design (red) and Personality (black) planet columns flanking the graph
+ * - Per-gate half-channel coloring: black / red / candy-striped for both
+ * - Canonical center colors (yellow head & G, green ajna, brown throat/
+ *   spleen/solar/root, red heart & sacral)
+ * - Hover highlights + tooltips, click-through to gate detail
+ * - Optional transit-gate overlay
+ *
+ * Geometry from hdkit (MIT) via natalengine/bodygraph-data.
  */
 
 import { GATE_PATHS, CENTER_SHAPES, GATE_CIRCLE_POSITIONS } from 'natalengine/bodygraph-data';
 import { GATES, CHANNELS } from 'natalengine';
 
-function createSvgElement(tag, attrs = {}) {
-  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function el(tag, attrs = {}, ns = null) {
+  const node = ns ? document.createElementNS(ns, tag) : document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
-    el.setAttribute(key, value);
+    if (key === 'text') node.textContent = value;
+    else if (key === 'class') node.setAttribute('class', value);
+    else node.setAttribute(key, value);
   }
-  return el;
+  return node;
 }
+const svgEl = (tag, attrs) => el(tag, attrs, SVG_NS);
 
 const isDark = () => document.documentElement.getAttribute('data-theme') === 'dark';
 
-/**
- * Render the bodygraph SVG into a container
- */
-export function renderBodygraph(container, data) {
-  const existing = container.querySelector('.bodygraph-svg');
-  if (existing) existing.remove();
+// Canonical HD planet-column order (Nodes before Moon) and glyphs
+export const PLANET_ORDER = [
+  'sun', 'earth', 'northNode', 'southNode', 'moon', 'mercury',
+  'venus', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto'
+];
 
-  const padding = 20;
-  const svg = createSvgElement('svg', {
+export const PLANET_GLYPHS = {
+  sun: '☉', earth: '⊕', moon: '☽', northNode: '☊', southNode: '☋',
+  mercury: '☿', venus: '♀', mars: '♂', jupiter: '♃', saturn: '♄',
+  uranus: '♅', neptune: '♆', pluto: '♇'
+};
+
+export const PLANET_NAMES = {
+  sun: 'Sun', earth: 'Earth', moon: 'Moon', northNode: 'North Node',
+  southNode: 'South Node', mercury: 'Mercury', venus: 'Venus', mars: 'Mars',
+  jupiter: 'Jupiter', saturn: 'Saturn', uranus: 'Uranus', neptune: 'Neptune',
+  pluto: 'Pluto'
+};
+
+// Traditional center colors (defined state): Head & G yellow, Ajna green,
+// Heart & Sacral red, Throat/Spleen/Solar Plexus/Root brown-tan — tuned
+// slightly warmer/softer to sit well in the app palette.
+const CENTER_COLORS = {
+  head: '#e9d56b', ajna: '#a3c46c', throat: '#c2a06b',
+  g: '#e9d56b', heart: '#dd6356', spleen: '#c2a06b',
+  solar: '#c2a06b', sacral: '#dd6356', root: '#c2a06b'
+};
+
+const SHAPE_KEY_MAP = {
+  Head: 'head', Ajna: 'ajna', Throat: 'throat',
+  G: 'g', Ego: 'heart', Sacral: 'sacral',
+  Spleen: 'spleen', SolarPlexus: 'solar', Root: 'root'
+};
+
+// gate -> [channels containing it]
+const GATE_CHANNELS = {};
+for (const ch of CHANNELS) {
+  for (const g of ch.gates) {
+    (GATE_CHANNELS[g] = GATE_CHANNELS[g] || []).push(ch);
+  }
+}
+
+function palette() {
+  const dark = isDark();
+  return {
+    personality: dark ? '#e8e4de' : '#262220',
+    design: dark ? '#e05545' : '#c0392b',
+    inactive: dark ? '#28241f' : '#eae5df',
+    undefinedCenter: dark ? '#1e1c18' : '#ffffff',
+    centerStroke: dark ? '#3a3630' : '#cfc7be',
+    text: dark ? '#e8e4de' : '#1a1714',
+    textInactive: dark ? '#56504a' : '#b3aaa1',
+    transit: dark ? '#d4943a' : '#c47a2a'
+  };
+}
+
+/**
+ * Render a bodygraph into `container`.
+ *
+ * @param {HTMLElement} container
+ * @param {object} chart - calculateHumanDesign() result
+ * @param {object} [opts]
+ * @param {boolean} [opts.compact] - mini graph: no columns, no tooltips, no animation
+ * @param {boolean} [opts.planetColumns] - set false to hide columns but keep interactivity
+ * @param {boolean} [opts.animate] - reveal animation (default true unless compact)
+ * @param {function} [opts.onGateClick] - (gateNum) => void
+ * @param {Iterable<number>} [opts.transitGates] - gates to ring with transit overlay
+ * @returns {{ highlightGate: (g: number|null) => void }}
+ */
+export function renderBodygraph(container, chart, opts = {}) {
+  const interactive = !opts.compact;
+  const showColumns = !opts.compact && opts.planetColumns !== false;
+  const animate = opts.animate !== false && !opts.compact;
+  container.innerHTML = '';
+  container.classList.add('bg-root');
+  if (opts.compact) container.classList.add('bg-compact');
+
+  const colors = palette();
+
+  const personalityGates = new Map(); // gate -> [{planet, line}]
+  const designGates = new Map();
+  const addActivation = (map, planet, g) => {
+    if (!g) return;
+    if (!map.has(g.gate)) map.set(g.gate, []);
+    map.get(g.gate).push({ planet, line: g.line });
+  };
+  for (const [planet, g] of Object.entries(chart.gates?.personality || {})) addActivation(personalityGates, planet, g);
+  for (const [planet, g] of Object.entries(chart.gates?.design || {})) addActivation(designGates, planet, g);
+  const activeGates = new Set([...personalityGates.keys(), ...designGates.keys()]);
+  const definedCenters = new Set(chart.centers?.definedNames || []);
+  const definedChannelKeys = new Set((chart.channels || []).map(ch => ch.gates.join('-')));
+  const transitGates = new Set(opts.transitGates || []);
+
+  // ---------- SVG ----------
+  const pad = 16;
+  const svg = svgEl('svg', {
     class: 'bodygraph-svg',
-    viewBox: `${-padding} ${-padding} ${851.41 + padding * 2} ${1309.4 + padding * 2}`,
-    xmlns: 'http://www.w3.org/2000/svg'
+    viewBox: `${-pad} ${-pad} ${851.41 + pad * 2} ${1309.4 + pad * 2}`,
+    role: 'img',
+    'aria-label': 'Human Design bodygraph'
   });
 
-  // Determine active gates and their sources
-  const personalityGateSet = new Set();
-  const designGateSet = new Set();
-  const activeGateSet = new Set(data.gates?.all || []);
+  // Stripe pattern for gates activated by both personality and design
+  const defs = svgEl('defs');
+  const pattern = svgEl('pattern', {
+    id: 'bg-stripe-both', width: '8', height: '8',
+    patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)'
+  });
+  pattern.appendChild(svgEl('rect', { width: '8', height: '8', fill: colors.personality }));
+  pattern.appendChild(svgEl('rect', { width: '4', height: '8', fill: colors.design }));
+  defs.appendChild(pattern);
+  svg.appendChild(defs);
 
-  if (data.gates?.personality) {
-    Object.values(data.gates.personality).forEach(g => { if (g) personalityGateSet.add(g.gate); });
-  }
-  if (data.gates?.design) {
-    Object.values(data.gates.design).forEach(g => { if (g) designGateSet.add(g.gate); });
-  }
-
-  // Defined centers
-  const definedCenters = new Set(data.centers?.definedNames || []);
-
-  // Colors
-  const colors = {
-    personality: isDark() ? '#e0dcd6' : '#2d2d2d',
-    design: '#c0392b',
-    both: isDark() ? '#d4943a' : '#6b4423',
-    inactive: isDark() ? '#2a2620' : '#e5e0da',
-    definedCenter: isDark() ? '#d4943a' : '#c47a2a',
-    undefinedCenter: isDark() ? '#1e1c18' : '#ffffff',
-    centerStroke: isDark() ? '#3a3630' : '#c8c0b8',
-    text: isDark() ? '#e8e4de' : '#1a1714',
-    textInactive: isDark() ? '#4a4540' : '#b8b0a8',
-    bg: isDark() ? '#1e1c18' : '#ffffff'
+  const gateFill = (gateNum) => {
+    const p = personalityGates.has(gateNum);
+    const d = designGates.has(gateNum);
+    if (p && d) return 'url(#bg-stripe-both)';
+    if (p) return colors.personality;
+    if (d) return colors.design;
+    return colors.inactive;
   };
 
-  // --- Layer 1: Gate paths ---
-  const pathGroup = createSvgElement('g', { class: 'gate-paths' });
-
+  // --- Channel paths (one per gate = half-channel) ---
+  const pathGroup = svgEl('g', { class: `bg-paths${animate ? ' bg-reveal-paths' : ''}` });
+  const gatePathEls = {};
   for (const [gateStr, pathData] of Object.entries(GATE_PATHS)) {
     const gateNum = parseInt(gateStr);
-    const isActive = activeGateSet.has(gateNum);
-    const isPersonality = personalityGateSet.has(gateNum);
-    const isDesign = designGateSet.has(gateNum);
-
-    let color = colors.inactive;
-    if (isPersonality && isDesign) color = colors.both;
-    else if (isPersonality) color = colors.personality;
-    else if (isDesign) color = colors.design;
-
-    const path = createSvgElement('path', {
+    const isActive = activeGates.has(gateNum);
+    const path = svgEl('path', {
       d: pathData,
-      fill: color,
-      opacity: isActive ? '1' : '0.35'
+      fill: gateFill(gateNum),
+      opacity: isActive ? '1' : '0.4',
+      'data-gate': gateNum,
+      class: 'bg-gate-path'
     });
+    gatePathEls[gateNum] = path;
     pathGroup.appendChild(path);
   }
   svg.appendChild(pathGroup);
 
-  // --- Layer 2: Centers ---
-  const centerGroup = createSvgElement('g', { class: 'centers' });
-
-  // Map from CENTER_SHAPES keys to our internal center keys
-  const shapeKeyMap = {
-    Head: 'head', Ajna: 'ajna', Throat: 'throat',
-    G: 'g', Ego: 'heart', Sacral: 'sacral',
-    Spleen: 'spleen', SolarPlexus: 'solar', Root: 'root'
-  };
-
-  const shortNames = {
-    Head: 'HD', Ajna: 'AJ', Throat: 'TH',
-    G: 'G', Ego: 'EG', Sacral: 'SC',
-    Spleen: 'SP', SolarPlexus: 'SP', Root: 'RT'
-  };
-
-  for (const [shapeKey, shapeData] of Object.entries(CENTER_SHAPES)) {
-    const centerKey = shapeKeyMap[shapeKey];
-    if (!centerKey) continue;
-
-    const isDefined = definedCenters.has(centerKey);
-
-    const shape = createSvgElement('path', {
+  // --- Centers (top-to-bottom order so the reveal animation flows down) ---
+  const centerGroup = svgEl('g', { class: 'bg-centers' });
+  const CENTER_REVEAL_ORDER = ['Head', 'Ajna', 'Throat', 'G', 'Ego', 'Spleen', 'SolarPlexus', 'Sacral', 'Root'];
+  CENTER_REVEAL_ORDER.forEach((shapeKey, i) => {
+    const shapeData = CENTER_SHAPES[shapeKey];
+    const centerKey = SHAPE_KEY_MAP[shapeKey];
+    if (!shapeData || !centerKey) return;
+    const defined = definedCenters.has(centerKey);
+    const path = svgEl('path', {
       d: shapeData.path,
-      fill: isDefined ? colors.definedCenter : colors.undefinedCenter,
-      stroke: isDefined ? colors.definedCenter : colors.centerStroke,
-      'stroke-width': isDefined ? '2' : '1.5',
-      opacity: isDefined ? '0.9' : '1'
+      fill: defined ? CENTER_COLORS[centerKey] : colors.undefinedCenter,
+      stroke: defined ? 'none' : colors.centerStroke,
+      'stroke-width': '1.5',
+      'data-center': centerKey,
+      class: 'bg-center'
     });
-    centerGroup.appendChild(shape);
-
-    // Center label
-    if (shapeData.center) {
-      const label = createSvgElement('text', {
-        x: shapeData.center.x,
-        y: shapeData.center.y + 5,
-        'text-anchor': 'middle',
-        'font-size': '14',
-        'font-weight': '600',
-        'font-family': 'Inter, system-ui, sans-serif',
-        fill: isDefined ? '#fff' : colors.text,
-        'pointer-events': 'none'
-      });
-      label.textContent = shortNames[shapeKey] || '';
-      centerGroup.appendChild(label);
+    if (animate) {
+      path.classList.add('bg-reveal');
+      path.style.animationDelay = `${i * 70}ms`;
     }
-  }
+    centerGroup.appendChild(path);
+  });
   svg.appendChild(centerGroup);
 
-  // --- Layer 3: Gate labels ---
-  const gateGroup = createSvgElement('g', { class: 'gate-labels' });
-
-  for (const [gateStr, circleData] of Object.entries(GATE_CIRCLE_POSITIONS)) {
+  // --- Gate circles + numbers ---
+  const gateGroup = svgEl('g', { class: 'bg-gates' });
+  const gateCircleEls = {};
+  for (const [gateStr, c] of Object.entries(GATE_CIRCLE_POSITIONS)) {
     const gateNum = parseInt(gateStr);
-    const isActive = activeGateSet.has(gateNum);
-    const isPersonality = personalityGateSet.has(gateNum);
-    const isDesign = designGateSet.has(gateNum);
+    const isActive = activeGates.has(gateNum);
+    const fill = gateFill(gateNum);
 
-    let fillColor = 'transparent';
-    let textColor = colors.textInactive;
-
-    if (isActive) {
-      if (isPersonality && isDesign) { fillColor = colors.both; textColor = '#fff'; }
-      else if (isPersonality) { fillColor = colors.personality; textColor = '#fff'; }
-      else if (isDesign) { fillColor = colors.design; textColor = '#fff'; }
+    const g = svgEl('g', { class: 'bg-gate', 'data-gate': gateNum, cursor: opts.compact ? 'default' : 'pointer' });
+    g.appendChild(svgEl('circle', {
+      cx: c.cx, cy: c.cy, r: c.r || 12.3,
+      fill: isActive ? fill : 'transparent',
+      stroke: isActive ? 'none' : colors.inactive,
+      'stroke-width': '1',
+      class: 'bg-gate-circle'
+    }));
+    if (transitGates.has(gateNum)) {
+      g.appendChild(svgEl('circle', {
+        cx: c.cx, cy: c.cy, r: (c.r || 12.3) + 4.5,
+        fill: 'none', stroke: colors.transit, 'stroke-width': '2.5',
+        'stroke-dasharray': '4 3', class: 'bg-transit-ring'
+      }));
     }
-
-    // Circle background
-    const circle = createSvgElement('circle', {
-      cx: circleData.cx,
-      cy: circleData.cy,
-      r: circleData.r || 12,
-      fill: fillColor,
-      stroke: isActive ? fillColor : colors.inactive,
-      'stroke-width': isActive ? '0' : '1'
-    });
-    gateGroup.appendChild(circle);
-
-    // Gate number text
-    const text = createSvgElement('text', {
-      x: circleData.cx,
-      y: circleData.cy + 4,
-      'text-anchor': 'middle',
-      'font-size': '10',
+    // Text must contrast with the circle fill: in dark mode the
+    // personality fill is light, so use dark text there.
+    const litTextColor = isDark() && personalityGates.has(gateNum) ? '#16130f' : '#fff';
+    g.appendChild(svgEl('text', {
+      x: c.cx, y: c.cy + 4,
+      'text-anchor': 'middle', 'font-size': '11',
       'font-weight': isActive ? '700' : '400',
       'font-family': 'Inter, system-ui, sans-serif',
-      fill: textColor,
-      'pointer-events': 'none'
-    });
-    text.textContent = gateNum;
-    gateGroup.appendChild(text);
+      fill: isActive ? litTextColor : colors.textInactive,
+      'pointer-events': 'none',
+      text: gateNum
+    }));
+    gateCircleEls[gateNum] = g;
+    gateGroup.appendChild(g);
   }
   svg.appendChild(gateGroup);
 
-  // --- Legend ---
-  const legendY = 1280;
-  const legendItems = [
-    { label: 'Personality', color: colors.personality },
-    { label: 'Design', color: colors.design },
-    { label: 'Both', color: colors.both },
-    { label: 'Defined Center', color: colors.definedCenter }
-  ];
+  // ---------- Highlight machinery ----------
+  let highlighted = null;
+  function setDim(dim) {
+    svg.classList.toggle('bg-dimmed', dim);
+  }
+  function highlightGate(gateNum) {
+    if (highlighted === gateNum) return;
+    // clear
+    for (const elList of [gatePathEls, gateCircleEls]) {
+      for (const node of Object.values(elList)) node.classList.remove('bg-lit');
+    }
+    highlighted = gateNum;
+    if (gateNum == null) { setDim(false); return; }
+    setDim(true);
+    const lit = new Set([gateNum]);
+    // light the full channel when the partner is also active
+    for (const ch of GATE_CHANNELS[gateNum] || []) {
+      if (definedChannelKeys.has(ch.gates.join('-'))) ch.gates.forEach(g => lit.add(g));
+    }
+    for (const g of lit) {
+      gatePathEls[g]?.classList.add('bg-lit');
+      gateCircleEls[g]?.classList.add('bg-lit');
+    }
+  }
 
-  let legendX = 200;
-  legendItems.forEach(item => {
-    const rect = createSvgElement('rect', {
-      x: legendX, y: legendY, width: 10, height: 10,
-      fill: item.color, rx: 2
-    });
-    const label = createSvgElement('text', {
-      x: legendX + 14, y: legendY + 9,
-      'font-size': '11', fill: colors.text,
-      'font-family': 'Inter, system-ui, sans-serif'
-    });
-    label.textContent = item.label;
-    svg.appendChild(rect);
-    svg.appendChild(label);
-    legendX += 14 + item.label.length * 6.5 + 16;
-  });
+  // ---------- Tooltip + events ----------
+  if (interactive) {
+    const tooltip = el('div', { class: 'bg-tooltip', role: 'tooltip' });
+    tooltip.style.display = 'none';
 
-  container.appendChild(svg);
+    function tooltipText(gateNum) {
+      const gate = GATES[gateNum];
+      const acts = [];
+      for (const { planet, line } of designGates.get(gateNum) || []) {
+        acts.push(`<span class="bg-tt-design">${PLANET_GLYPHS[planet]} ${gateNum}.${line}</span>`);
+      }
+      for (const { planet, line } of personalityGates.get(gateNum) || []) {
+        acts.push(`<span class="bg-tt-personality">${PLANET_GLYPHS[planet]} ${gateNum}.${line}</span>`);
+      }
+      const channelNote = (GATE_CHANNELS[gateNum] || [])
+        .filter(ch => definedChannelKeys.has(ch.gates.join('-')))
+        .map(ch => `Channel of ${ch.name} (${ch.gates.join('-')})`)
+        .join(' · ');
+      return `<strong>Gate ${gateNum} — ${gate?.name || ''}</strong>` +
+        (acts.length ? `<div class="bg-tt-acts">${acts.join(' ')}</div>` : '') +
+        (channelNote ? `<div class="bg-tt-channel">${channelNote}</div>` : '');
+    }
+
+    function moveTooltip(evt) {
+      const rect = container.getBoundingClientRect();
+      tooltip.style.left = `${evt.clientX - rect.left + 12}px`;
+      tooltip.style.top = `${evt.clientY - rect.top + 12}px`;
+    }
+
+    svg.addEventListener('pointerover', (evt) => {
+      const target = evt.target.closest('[data-gate]');
+      if (!target) return;
+      const gateNum = parseInt(target.getAttribute('data-gate'));
+      highlightGate(gateNum);
+      tooltip.innerHTML = tooltipText(gateNum);
+      tooltip.style.display = 'block';
+      moveTooltip(evt);
+    });
+    svg.addEventListener('pointermove', (evt) => {
+      if (tooltip.style.display === 'block') moveTooltip(evt);
+    });
+    svg.addEventListener('pointerout', (evt) => {
+      if (!evt.relatedTarget || !svg.contains(evt.relatedTarget) || !evt.relatedTarget.closest('[data-gate]')) {
+        highlightGate(null);
+        tooltip.style.display = 'none';
+      }
+    });
+    svg.addEventListener('click', (evt) => {
+      const target = evt.target.closest('[data-gate]');
+      if (target && opts.onGateClick) opts.onGateClick(parseInt(target.getAttribute('data-gate')));
+    });
+
+    container.appendChild(tooltip);
+  }
+
+  // ---------- Planet columns ----------
+  function planetColumn(side, gates, dateLabel) {
+    const col = el('div', { class: `bg-planets bg-planets-${side}` });
+    const title = side === 'design' ? 'Design' : 'Personality';
+    col.appendChild(el('div', {
+      class: 'bg-planets-head',
+      text: title
+    }));
+    if (dateLabel) col.appendChild(el('div', { class: 'bg-planets-date', text: dateLabel }));
+    for (const planet of PLANET_ORDER) {
+      const g = gates?.[planet];
+      const row = el('div', { class: 'bg-planet-row', 'data-gate': g ? g.gate : '', title: PLANET_NAMES[planet] });
+      row.appendChild(el('span', { class: 'bg-planet-glyph', text: PLANET_GLYPHS[planet] }));
+      row.appendChild(el('span', { class: 'bg-planet-act', text: g ? `${g.gate}.${g.line}` : '—' }));
+      if (g) {
+        row.addEventListener('pointerenter', () => highlightGate(g.gate));
+        row.addEventListener('pointerleave', () => highlightGate(null));
+        if (opts.onGateClick) {
+          row.style.cursor = 'pointer';
+          row.addEventListener('click', () => opts.onGateClick(g.gate));
+        }
+      }
+      col.appendChild(row);
+    }
+    return col;
+  }
+
+  if (showColumns) {
+    const designDate = chart.positions?.design?.date || null;
+    const wrap = el('div', { class: 'bg-grid' });
+    wrap.appendChild(planetColumn('design', chart.gates?.design, designDate));
+    const svgWrap = el('div', { class: 'bg-svg-wrap' });
+    svgWrap.appendChild(svg);
+    wrap.appendChild(svgWrap);
+    wrap.appendChild(planetColumn('personality', chart.gates?.personality, chart.positions?.personality?.date || null));
+    container.appendChild(wrap);
+  } else {
+    container.appendChild(svg);
+  }
+
+  return { highlightGate };
 }
 
 export default renderBodygraph;
