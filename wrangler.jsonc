@@ -1,0 +1,16 @@
+{
+  // Open Human Design — one Worker serves the SPA + the remote MCP server.
+  // Local dev:  npm run build && npx wrangler dev
+  // Deploy:     npx wrangler deploy   (requires `wrangler login` once)
+  "name": "open-human-design",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-05-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

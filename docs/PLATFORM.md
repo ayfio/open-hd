@@ -124,18 +124,38 @@ on `updated_at` is *correct*, not a compromise. CRDTs are overkill.
 `workers-oauth-provider` (authorize/token/register + discovery + DCR). better-auth is the
 OAuth upstream, so SPA identity and MCP identity are one user.
 
-**Tools** (read scope unless noted):
+**Tool design principle: the right number is "one tool per human intent."** Not one per
+engine function (overwhelming — the engine has dozens), not one mega-tool (un-promptable).
+Every tool is one-shot: it answers a whole question in a single call, with interpretive
+text inlined. A shared `BirthInput` shape keeps them coherent:
 
-| Tool | Purpose |
+```
+BirthInput = { birthDate, birthTime?, place? }        // place geocoded + tz-resolved server-side
+           | { birthDate, birthTime?, lat, lon, utcOffset }
+           | "Saved Name"                              // Phase 4+, signed-in only
+```
+
+**Phase 2 — five tools, no auth needed** (compute is deterministic math on public data):
+
+| Tool | Intent it answers | Metered |
+|---|---|---|
+| `compute_chart({birth, systems?, detail?})` | "What's the chart for someone born …?" — HD by default; `systems` adds `gene_keys` / `astrology` (multi-system from day one) | 1 unit |
+| `compare_charts({personA, personB})` | "How do these two people fit?" — typed connection channels + composite | 1 unit |
+| `get_transits({birth, date?})` | "What's the weather over this chart today?" | 1 unit |
+| `analyze_team({members[]})` | "How does this group work?" — Penta roles | 1 unit |
+| `get_descriptions({gates?, channels?, centers?})` | "Tell me more about Gate 34" — follow-up depth without recomputing | free |
+
+**Phase 4 adds three** (write scope explicit, off by default):
+
+| Tool | Intent |
 |---|---|
-| `list_people()` | Names + birth summaries of **ai_access-flagged** people only |
-| `get_chart({person, detail})` | Resolve person by name/id → full HD chart (foundation → full substructure) |
-| `compute_chart({birthDate, birthTime, place?, tzOffset?})` | Ad-hoc chart for arbitrary birth data — works without any saved people |
-| `compare_charts({personA, personB})` | Connection analysis (electromagnetic/companionship/compromise/dominance) |
-| `get_transits({person?, date?})` | Transit weather over a natal chart |
-| `analyze_team({people[]})` | Penta/group dynamics |
-| `get_descriptions({gates?, channels?})` | Interpretive text so the AI explains in plain language, not bare codes |
-| `save_person(...)` / `delete_person(...)` | Write scope, **off by default** |
+| `list_people()` | "Who do I have saved?" — **ai_access-flagged rows only** |
+| `save_person({name, birth})` | "Remember my sister's chart" — the AI becomes a way to *build* your library |
+| `delete_person({person})` | Cleanup, with confirmation semantics |
+
+`get_chart("Mom")` is not a ninth tool — saved names slot into `BirthInput`, so
+`compute_chart`/`compare_charts`/`get_transits` all accept people by name once signed in.
+Eight tools total, five at launch. Ambiguous names return candidates instead of guessing.
 
 Three design rules with teeth:
 - **`ai_access` is enforced in the query**, not the prompt: MCP tools can only see rows
@@ -230,9 +250,9 @@ don't pretend. The ladder, stated plainly in the UI:
 
 | Phase | What | Effort |
 |---|---|---|
-| **0** | `PeopleStore` seam + `VITE_OHD_API_BASE` flag (no behavior change; protects self-hosters) | ~0.5 day |
-| **1** | Cloudflare hosting cutover: `wrangler.jsonc`, Workers Static Assets, domain | ~0.5–1 day |
-| **2** | **Remote MCP, ad-hoc tools first** — `compute_chart`/`compare`/`transits` + OAuth shell; test against Claude/ChatGPT/Cursor. Valuable before sync exists. | ~2–4 days |
+| **0** | ✅ *done 2026-06-04* — `PeopleStore` seam in `src/lib/people.js` (no behavior change; protects self-hosters) | ~0.5 day |
+| **1** | ✅ *code done 2026-06-04* — `wrangler.jsonc` + `worker/index.js` (Workers Static Assets, SPA fallback); **deploy pending `wrangler login` + domain** | ~0.5–1 day |
+| **2** | ✅ *code done 2026-06-04* — `worker/mcp.js`: all five tools live, stateless streamable HTTP, flexible geocoding, 11 tests + verified through workerd. No auth yet (tools are public deterministic math); OAuth ships with accounts. Test against Claude/ChatGPT after deploy. | ~2–4 days |
 | **3** | better-auth (magic link + Google + Apple) + D1 schema + LWW sync + SyncStore + lazy sign-in UI | ~3–5 days |
 | **4** | **User-scoped MCP** — `list_people`/`get_chart` over D1 with `ai_access` gating + name resolution → *"pull up Mom's chart" works* | ~2–3 days |
 | **5** | Passkeys, dedupe UI, E2E no-AI tier, Turnstile, legacy `/sse` compat, privacy copy polish | ongoing |
@@ -253,16 +273,29 @@ don't pretend. The ladder, stated plainly in the UI:
 - **Team/Enterprise Claude** requires an org Owner to add custom connectors — individual
   plans (incl. Free, 1 connector) are the launch audience.
 
-## The Parachute seam (deliberate, not coupled)
+## The Parachute vision (deliberate seams, no coupling)
 
 What this platform does — personal data + scoped tokens + "my AI can just access it" —
-is Parachute Computer's thesis in miniature. OpenHD should ship standalone (clean
-open-source story, no dependency on Parachute's maturity), **but** the `PeopleStore`
-interface and the MCP tool contract are the two seams where a Parachute-vault-backed
-implementation could swap in later: people as vault documents, AI access via hub-minted
-scoped tokens. Design decision: keep both contracts storage-agnostic.
+is Parachute Computer's thesis in miniature. The full vision has three horizons:
 
-**Convergence milestone:** when Parachute has consumer-grade multi-tenant onboarding,
-OpenHD accounts can become Parachute vaults — and OpenHD becomes Parachute's first
-consumer showcase app. Until then, D1 is the boring, correct choice; nothing built now
-is thrown away in that future (the Worker swaps its storage adapter).
+**Horizon 1 (now): the open API is anchor-able into anyone's Parachute setup.**
+Because the MCP/API contract is public and the compute tools need no account, a person
+running their own Parachute can wire chart computation into their personal system today —
+a Parachute Runner that posts the day's transits into a vault note, an agent that
+computes a chart for anyone they meet, their own custom chart UI reading our API. *They
+don't need our app at all* — and that's the point. OpenHD is the mainstream on-ramp; the
+open interface is the power-user's escape hatch. Both consume the same engine, so
+accuracy is identical everywhere.
+
+**Horizon 2: people-as-vault-data.** The `PeopleStore` interface and the MCP tool
+contract are the two storage-agnostic seams. A Parachute-backed implementation slots in
+behind them: saved people as vault documents, AI access via hub-minted scoped tokens
+instead of our OAuth — your birth-data library living in *your* vault, with OpenHD as
+one client of it.
+
+**Horizon 3 (convergence milestone): OpenHD accounts *are* Parachute vaults.** When
+Parachute has consumer-grade multi-tenant onboarding, the D1 store can be swapped for
+vault storage wholesale and OpenHD becomes Parachute's first consumer showcase — proof
+that "your data, your agents, your tools" works for people who will never say the word
+"self-host." Until then, D1 is the boring, correct choice; nothing built now is thrown
+away (the Worker swaps its storage adapter; the tool contract never changes).

@@ -13,8 +13,10 @@ account/tracking — local-first.
 npm run dev      # Start Vite dev server
 npm run build    # Build for production
 npm run preview  # Preview production build
-npm test         # Unit tests (node --test)
+npm test         # Unit tests incl. MCP server (node --test; hits Open-Meteo)
 npm run e2e      # Browser smoke test (needs dev server running + Chrome)
+npx wrangler dev # Worker locally: SPA + /mcp (build first)
+npx wrangler deploy  # Deploy to Cloudflare (needs wrangler login)
 ```
 
 ## Setup
@@ -44,6 +46,12 @@ src/
     ├── transits.js    # transit overlay graph + completions
     ├── connection.js  # two-person comparison (saved people or manual)
     └── team.js        # penta/group analysis
+
+worker/
+├── index.js           # Cloudflare Worker entry: /mcp → MCP server, /* → static assets
+└── mcp.js             # remote MCP: 5 one-shot tools (compute_chart, compare_charts,
+                       #   get_transits, analyze_team, get_descriptions), stateless
+                       #   streamable HTTP — see docs/PLATFORM.md for the design
 ```
 
 Single-page app, 4 views. State lives in main.js (`currentData`); views read it via
