@@ -16,6 +16,7 @@ export function birthToParams(birth) {
   if (birth.birthTime) p.set('t', birth.birthTime);
   if (birth.timezone !== undefined && birth.timezone !== null) p.set('tz', String(birth.timezone));
   if (birth.name) p.set('n', birth.name);
+  if (birth.timeUnknown) p.set('tu', '1');
   if (birth.location) {
     if (birth.location.name) p.set('place', birth.location.name);
     if (birth.location.lat !== undefined && birth.location.lat !== null) p.set('lat', String(birth.location.lat));
@@ -45,6 +46,7 @@ export function paramsToBirth(searchParams) {
     name: p.get('n') || null,
     birthDate: d,
     birthTime,
+    timeUnknown: p.get('tu') === '1',
     timezone,
     location: (hasCoords || placeName || iana) ? {
       lat: hasCoords ? lat : null,

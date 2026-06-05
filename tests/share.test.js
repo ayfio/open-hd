@@ -6,6 +6,7 @@ const full = {
   name: 'Alex',
   birthDate: '1990-06-15',
   birthTime: '14:30',
+  timeUnknown: false,
   timezone: -6,
   location: {
     lat: 39.7392,
@@ -45,4 +46,10 @@ test('ignores malformed time/tz, keeps date', () => {
 test('fractional timezone offsets survive', () => {
   const out = paramsToBirth('d=1985-03-20&t=08:00&tz=5.5');
   assert.equal(out.timezone, 5.5);
+});
+
+test('timeUnknown round-trips', () => {
+  const out = paramsToBirth(birthToParams({ ...full, timeUnknown: true }).toString());
+  assert.equal(out.timeUnknown, true);
+  assert.equal(paramsToBirth('d=1990-06-15').timeUnknown, false);
 });

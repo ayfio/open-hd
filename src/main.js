@@ -7,6 +7,7 @@
  */
 
 import { computeChart, sensitivityCheck } from './lib/chartdata.js';
+import { esc } from './lib/format.js';
 import { listPeople, getPerson, savePerson, deletePerson, birthFromPerson, getLastPersonId, setLastPersonId } from './lib/people.js';
 import { paramsToBirth, birthToParams, shareUrl } from './lib/share.js';
 import { setupEntryView } from './views/entry.js';
@@ -86,10 +87,10 @@ function renderPeopleSwitcher() {
   select.classList.remove('hidden');
   const currentId = currentData?.birth?.id || '';
   const unsaved = currentData && !currentData.birth.id
-    ? `<option value="__current" selected>${currentData.birth.name || 'Current chart'}</option>` : '';
+    ? `<option value="__current" selected>${esc(currentData.birth.name) || 'Current chart'}</option>` : '';
   select.innerHTML = `
     ${unsaved}
-    ${people.map(p => `<option value="${p.id}" ${p.id === currentId ? 'selected' : ''}>${p.name}</option>`).join('')}
+    ${people.map(p => `<option value="${esc(p.id)}" ${p.id === currentId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
     <option value="__new">+ New chart…</option>
     ${currentId ? '<option value="__delete">Remove this person…</option>' : ''}
   `;
@@ -112,7 +113,7 @@ function setupPeopleSwitcher() {
     if (value === '__delete') {
       const id = currentData?.birth?.id;
       if (id && confirm(`Remove ${currentData.birth.name} from saved charts?`)) {
-        deletePerson(id);
+        try { deletePerson(id); } catch (e) { console.warn('Could not delete person:', e); }
         setLastPersonId(null);
         currentData = null;
         history.replaceState(null, '', window.location.pathname);
@@ -135,8 +136,14 @@ function setupPeopleSwitcher() {
 function loadBirth(birth, { save = false } = {}) {
   let resolved = birth;
   if (save && birth.name) {
-    const saved = savePerson(birth);
-    resolved = { ...birth, id: saved.id };
+    // Storage can fail (private mode, quota, 50-profile cap) — the chart
+    // must render regardless.
+    try {
+      const saved = savePerson(birth);
+      resolved = { ...birth, id: saved.id };
+    } catch (e) {
+      console.warn('Could not save person:', e);
+    }
   }
 
   currentData = computeChart(resolved);
@@ -146,7 +153,9 @@ function loadBirth(birth, { save = false } = {}) {
   history.replaceState(null, '', `${window.location.pathname}?${birthToParams(resolved)}`);
 
   renderChartView(currentData, {
-    onShare: () => navigator.clipboard?.writeText(shareUrl(resolved))
+    // No optional chaining — a missing clipboard API must reject so the
+    // button reports failure honestly instead of "copied".
+    onShare: () => navigator.clipboard.writeText(shareUrl(resolved))
   });
   renderPeopleSwitcher();
   showView('chart');

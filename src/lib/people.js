@@ -17,6 +17,7 @@ export function savePerson(birth) {
     name: birth.name || 'Unnamed',
     birthDate: birth.birthDate,
     birthTime: birth.birthTime,
+    timeUnknown: !!birth.timeUnknown,
     location: birth.location ? {
       lat: birth.location.lat,
       lon: birth.location.lon,
@@ -34,6 +35,7 @@ export function birthFromPerson(p) {
     name: p.name,
     birthDate: p.birthDate,
     birthTime: p.birthTime || '12:00',
+    timeUnknown: !!p.timeUnknown,
     timezone: p.location?.timezone ?? 0,
     location: p.location && (p.location.lat != null || p.location.name || p.location.iana) ? {
       lat: p.location.lat,

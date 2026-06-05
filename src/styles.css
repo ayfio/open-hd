@@ -9,7 +9,7 @@
   --bg-sunken: #f0ede8;
   --text: #1a1714;
   --text-secondary: #6b6560;
-  --text-tertiary: #9e9790;
+  --text-tertiary: #79716a; /* 4.5:1 on --bg — tertiary carries labels, must stay readable */
   --border: #e5e0da;
   --border-subtle: #ede9e3;
 
@@ -312,11 +312,13 @@ body {
   margin-top: 12px;
   padding: 4px 14px;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: #8a5418; /* 5:1 on --accent-soft */
   border-radius: 20px;
   font-size: 13px;
   font-weight: 500;
 }
+
+[data-theme="dark"] .type-banner .type-strategy { color: var(--accent); }
 
 /* =============================================
    Chart Layout
@@ -335,6 +337,8 @@ body {
 .chart-column {
   position: sticky;
   top: calc(var(--header-height) + 24px);
+  max-height: calc(100vh - var(--header-height) - 48px);
+  overflow-y: auto;
 }
 
 .bodygraph-container {
@@ -877,7 +881,9 @@ body {
 
 .bg-compact .bodygraph-svg { width: 100%; height: auto; }
 
-@media (max-width: 560px) {
+/* Match .chart-layout's single-column breakpoint so the planet columns
+   never squeeze the graph inside an already-narrow column. */
+@media (max-width: 768px) {
   .bg-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -975,7 +981,7 @@ body {
 }
 
 .place-result:last-child { border-bottom: none; }
-.place-result:hover { background: var(--bg-sunken); }
+.place-result:hover, .place-result.active { background: var(--bg-sunken); }
 
 .tz-chip {
   display: inline-block;

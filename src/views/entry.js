@@ -48,9 +48,29 @@ export function setupEntryView({ onSubmit }) {
   }
 
   // --- Place autocomplete ---
+  let resultPlaces = [];
+  let activeIndex = -1;
+
   function clearResults() {
     placeResults.innerHTML = '';
     placeResults.classList.add('hidden');
+    resultPlaces = [];
+    activeIndex = -1;
+  }
+
+  function selectPlace(place) {
+    selectedPlace = place;
+    placeInput.value = place.label;
+    clearResults();
+    updateTzChip();
+  }
+
+  function setActive(index) {
+    const items = placeResults.querySelectorAll('.place-result');
+    if (!items.length) return;
+    activeIndex = ((index % items.length) + items.length) % items.length;
+    items.forEach((el, i) => el.classList.toggle('active', i === activeIndex));
+    items[activeIndex].scrollIntoView({ block: 'nearest' });
   }
 
   function updateTzChip() {
@@ -83,18 +103,34 @@ export function setupEntryView({ onSubmit }) {
           `<button type="button" class="place-result" data-i="${i}">${esc(p.label)}</button>`
         ).join('');
         placeResults.classList.remove('hidden');
+        resultPlaces = places;
+        activeIndex = -1;
         placeResults.querySelectorAll('.place-result').forEach(btn => {
-          btn.addEventListener('click', () => {
-            selectedPlace = places[parseInt(btn.dataset.i)];
-            placeInput.value = selectedPlace.label;
-            clearResults();
-            updateTzChip();
-          });
+          btn.addEventListener('click', () => selectPlace(places[parseInt(btn.dataset.i)]));
         });
       } catch {
         clearResults();
       }
     }, 250);
+  });
+
+  // Keyboard navigation: arrows move through results; Enter commits the
+  // highlighted (or first) result instead of submitting the form.
+  placeInput.addEventListener('keydown', (e) => {
+    const open = !placeResults.classList.contains('hidden') && resultPlaces.length;
+    if (!open) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActive(activeIndex + 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive(activeIndex - 1);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      selectPlace(resultPlaces[activeIndex >= 0 ? activeIndex : 0]);
+    } else if (e.key === 'Escape') {
+      clearResults();
+    }
   });
 
   // Close dropdown on outside click
@@ -128,7 +164,17 @@ export function setupEntryView({ onSubmit }) {
     let timezone = 0;
     let location = null;
     if (manualMode) {
-      timezone = parseFloat(manualOffset.value) || 0;
+      // Require an explicit offset — silently defaulting to UTC produces
+      // confidently wrong charts.
+      const raw = manualOffset.value.trim();
+      const parsed = parseFloat(raw);
+      if (raw === '' || Number.isNaN(parsed)) {
+        manualOffset.focus();
+        manualOffset.setAttribute('aria-invalid', 'true');
+        return;
+      }
+      manualOffset.removeAttribute('aria-invalid');
+      timezone = parsed;
     } else if (selectedPlace) {
       try {
         timezone = offsetForZone(birthDate, birthTime, selectedPlace.timezone);

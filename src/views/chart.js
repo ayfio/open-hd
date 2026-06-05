@@ -5,8 +5,8 @@
 import {
   GATE_DESCRIPTIONS,
   CHANNEL_DESCRIPTIONS,
-  CIRCUIT_GROUPS,
-  GATES
+  GATES,
+  CHANNELS
 } from 'natalengine';
 
 import { renderBodygraph, PLANET_ORDER, PLANET_GLYPHS, PLANET_NAMES } from '../bodygraph.js';
@@ -57,12 +57,15 @@ export function renderChartView(data, { onShare } = {}) {
       <button id="share-chart" class="btn-secondary btn-small">Copy chart link</button>
     </div>
   `;
-  document.getElementById('share-chart').addEventListener('click', (e) => {
-    if (onShare) {
-      onShare();
+  document.getElementById('share-chart').addEventListener('click', async (e) => {
+    if (!onShare) return;
+    try {
+      await onShare();
       e.target.textContent = 'Link copied ✓';
-      setTimeout(() => { e.target.textContent = 'Copy chart link'; }, 2000);
+    } catch {
+      e.target.textContent = 'Copy blocked — use the address bar URL';
     }
+    setTimeout(() => { e.target.textContent = 'Copy chart link'; }, 2500);
   });
 
   // --- Bodygraph ---
@@ -142,7 +145,7 @@ function renderFoundation(chart, sensitivity = null) {
       <div class="foundation-item">
         <div class="label">Dominant Circuit</div>
         <div class="value">${esc(circuitText)}</div>
-        <div class="detail">${circuitDominant ? esc(CIRCUIT_GROUPS[circuitDominant.name]?.theme || '') : 'No defined channels'}</div>
+        <div class="detail">${circuitDominant ? esc(circuitDominant.theme || '') : 'No defined channels'}</div>
       </div>
       <div class="foundation-item">
         <div class="label">Variable</div>
@@ -261,15 +264,17 @@ function renderChannelsPanel(container) {
     return;
   }
 
-  // Hanging gates: active gates whose channel partner is inactive
+  // Hanging gates: for every channel where exactly one gate is active,
+  // the active gate "hangs", seeking its partner. Gates in multiple
+  // channels (10, 20, 34, 57) can hang toward several partners at once.
   const activeSet = new Set(chart.gates.all);
   const hanging = [];
-  for (const gateNum of chart.gates.all) {
-    const desc = GATE_DESCRIPTIONS[gateNum];
-    if (desc?.harmonic && !activeSet.has(desc.harmonic)) {
-      hanging.push({ gate: gateNum, harmonic: desc.harmonic });
-    }
+  for (const ch of CHANNELS) {
+    const [a, b] = ch.gates;
+    if (activeSet.has(a) && !activeSet.has(b)) hanging.push({ gate: a, harmonic: b });
+    if (activeSet.has(b) && !activeSet.has(a)) hanging.push({ gate: b, harmonic: a });
   }
+  hanging.sort((x, y) => x.gate - y.gate);
 
   const channelsHtml = chart.channels.map(ch => {
     const key = `${ch.gates[0]}-${ch.gates[1]}`;
