@@ -27,9 +27,19 @@
         </nav>
         <div class="header-actions">
           <select id="people-switcher" class="people-switcher hidden" title="Saved charts"></select>
+          <button id="sync-button" class="btn-secondary btn-small hidden"></button>
           <button id="theme-toggle" class="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">
             <span class="theme-icon" aria-hidden="true">◐</span>
           </button>
+        </div>
+        <div id="sync-popover" class="sync-popover hidden">
+          <div class="panel-title">Sync across devices</div>
+          <p class="panel-intro">Your charts stay on this device by default. Sign in to keep them in sync everywhere — we store only birth data, never sell it, never train on it.</p>
+          <form id="sync-form">
+            <input type="email" id="sync-email" placeholder="you@example.com" required>
+            <button type="submit" class="btn-primary">Email me a sign-in link</button>
+          </form>
+          <p id="sync-status" class="sync-status"></p>
         </div>
       </div>
     </header>

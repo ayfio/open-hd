@@ -43,9 +43,30 @@ const LocalStore = {
   }
 };
 
-// The active store. Phase 3 wraps this with a SyncStore decorator when
-// import.meta.env.VITE_OHD_API_BASE is set and the user signs in.
-const store = LocalStore;
+// SyncStore decorator: write-through to LocalStore (instant, offline-
+// correct), with dirty-marking so the background sync pushes changes.
+// Active only when a session exists (see enableSync below).
+import { markDirty, markDeleted } from './sync.js';
+
+let syncEnabled = false;
+export function enableSync() { syncEnabled = true; }
+
+const SyncStore = {
+  list: LocalStore.list,
+  get: LocalStore.get,
+  save(birth) {
+    const saved = LocalStore.save(birth);
+    if (syncEnabled) markDirty(saved.id);
+    return saved;
+  },
+  delete(id) {
+    const result = LocalStore.delete(id);
+    if (syncEnabled) markDeleted(id);
+    return result;
+  }
+};
+
+const store = SyncStore;
 
 // ---------------------------------------------------------------------------
 // Public API (stable — main.js and views depend on these names)

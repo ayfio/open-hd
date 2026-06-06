@@ -5,6 +5,7 @@
   "name": "open-human-design",
   "main": "worker/index.js",
   "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
@@ -14,6 +15,13 @@
   "routes": [
     { "pattern": "openhumandesign.com", "custom_domain": true },
     { "pattern": "www.openhumandesign.com", "custom_domain": true }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "open-human-design",
+      "database_id": "506217ad-e026-403e-bf0a-06d42b609eee"
+    }
   ],
   "observability": {
     "enabled": true

@@ -8,7 +8,8 @@
 
 import { computeChart, sensitivityCheck } from './lib/chartdata.js';
 import { esc } from './lib/format.js';
-import { listPeople, getPerson, savePerson, deletePerson, birthFromPerson, getLastPersonId, setLastPersonId } from './lib/people.js';
+import { listPeople, getPerson, savePerson, deletePerson, birthFromPerson, getLastPersonId, setLastPersonId, enableSync } from './lib/people.js';
+import { syncAvailable, getSessionUser, requestMagicLink, signOut, startSync } from './lib/sync.js';
 import { paramsToBirth, birthToParams, shareUrl } from './lib/share.js';
 import { setupEntryView } from './views/entry.js';
 import { renderChartView, setupPanelTabs, rerenderBodygraph } from './views/chart.js';
@@ -162,6 +163,58 @@ function loadBirth(birth, { save = false } = {}) {
 }
 
 // ==========================================
+// Sync (optional accounts)
+// ==========================================
+async function setupSync() {
+  if (!syncAvailable) return;
+  const button = document.getElementById('sync-button');
+  const popover = document.getElementById('sync-popover');
+  const status = document.getElementById('sync-status');
+  button.classList.remove('hidden');
+
+  const user = await getSessionUser();
+
+  if (user) {
+    enableSync();
+    startSync({
+      onRemoteChange: () => {
+        renderPeopleSwitcher();
+        entryApi?.renderQuickPick();
+      }
+    });
+    button.textContent = '✓ Synced';
+    button.title = `Signed in as ${user.email} — click to sign out`;
+    button.addEventListener('click', async () => {
+      if (confirm(`Signed in as ${user.email}. Sign out?\n\nYour charts stay on this device.`)) {
+        await signOut();
+        window.location.reload();
+      }
+    });
+    return;
+  }
+
+  button.textContent = 'Sync';
+  button.title = 'Sign in to sync your charts across devices';
+  button.addEventListener('click', () => popover.classList.toggle('hidden'));
+  document.addEventListener('click', (e) => {
+    if (!popover.contains(e.target) && e.target !== button) popover.classList.add('hidden');
+  });
+
+  document.getElementById('sync-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('sync-email').value.trim();
+    if (!email) return;
+    status.textContent = 'Sending…';
+    try {
+      await requestMagicLink(email);
+      status.textContent = 'Check your email for the sign-in link ✓';
+    } catch {
+      status.textContent = 'Could not send — sync lives at openhumandesign.com';
+    }
+  });
+}
+
+// ==========================================
 // Boot
 // ==========================================
 function init() {
@@ -174,6 +227,7 @@ function init() {
   setupPeopleSwitcher();
 
   document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+  setupSync();
 
   entryApi = setupEntryView({
     onSubmit: (birth, { savedPerson = false } = {}) =>
