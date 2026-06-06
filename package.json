@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "natalengine": "file:../natal-engine"
+    "natalengine": "^1.2.0"
   },
   "devDependencies": {
     "playwright-core": "^1.60.0",

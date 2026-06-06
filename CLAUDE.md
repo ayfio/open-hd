@@ -19,12 +19,15 @@ npx wrangler dev # Worker locally: SPA + /mcp (build first)
 npx wrangler deploy  # Deploy to Cloudflare (needs wrangler login)
 ```
 
-## Setup
+## Setup & hosting
 
-`natalengine` is consumed as `file:../natal-engine` — clone
-[Unforced-Dev/natal-engine](https://github.com/Unforced-Dev/natal-engine) as a sibling directory
-before `npm install`. CI (`.github/workflows/deploy.yml`) does the same; deploys to GitHub Pages at
-https://unforced-dev.github.io/open-human-design/ on push to main.
+`natalengine` comes from npm (`^1.2.0`). For engine development, clone
+[Unforced-Dev/natal-engine](https://github.com/Unforced-Dev/natal-engine) as a sibling and
+`npm link`/`file:` it temporarily — but published versions are the default.
+
+**Primary hosting**: Cloudflare Worker → https://openhumandesign.com (SPA + `/mcp`), deployed
+manually with `npx wrangler deploy`. GitHub Pages mirror auto-deploys on push to main
+(https://unforced-dev.github.io/open-human-design/).
 
 ## Architecture
 

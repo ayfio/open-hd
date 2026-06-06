@@ -10,6 +10,11 @@
     "binding": "ASSETS",
     "not_found_handling": "single-page-application"
   },
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "openhumandesign.com", "custom_domain": true },
+    { "pattern": "www.openhumandesign.com", "custom_domain": true }
+  ],
   "observability": {
     "enabled": true
   }

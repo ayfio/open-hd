@@ -2,7 +2,7 @@
 
 **Free, open-source, interactive Human Design charts — all the depth, none of the paywall.**
 
-**[→ Open the app](https://unforced-dev.github.io/open-human-design/)**
+**[→ openhumandesign.com](https://openhumandesign.com)**
 
 Every other Human Design tool charges for the deep layers. Open HD gives you the complete chart
 for free, calculated precisely, in an interface designed to be calm rather than overwhelming:
@@ -36,13 +36,24 @@ for free, calculated precisely, in an interface designed to be calm rather than 
 No account. No tracking. Charts are computed in your browser and saved to your device only.
 Shareable links encode birth data in the URL — share deliberately.
 
+## Connect your AI
+
+Open HD ships a remote MCP server — point Claude (Settings → Connectors → add
+`https://openhumandesign.com/mcp`), ChatGPT (developer mode), or Cursor at it and your
+AI can compute charts, compare two people, and check transits in conversation:
+
+> *"What's the Human Design chart for someone born June 15th 1990, 2:30pm in Boulder?"*
+
+Tools: `compute_chart` (Human Design / Gene Keys / astrology), `compare_charts`,
+`get_transits`, `analyze_team`, `get_descriptions`. No account needed — saved-people
+tools arrive with optional accounts (see `docs/PLATFORM.md`).
+
 ## Development
 
 ```bash
-git clone https://github.com/Unforced-Dev/natal-engine        # calculation engine (sibling dir)
 git clone https://github.com/Unforced-Dev/open-human-design
 cd open-human-design
-npm install
+npm install        # natalengine comes from npm
 npm run dev
 ```
 
