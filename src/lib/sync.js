@@ -12,6 +12,7 @@
  */
 
 import { getProfiles, saveProfile, deleteProfile } from 'natalengine';
+import { getAiAccess, setAiAccess } from './people.js';
 
 const API = import.meta.env.VITE_OHD_API_BASE; // undefined = sync disabled
 const CURSOR_KEY = 'ohd-sync-cursor';
@@ -84,7 +85,7 @@ export async function signOut() {
 }
 
 // --- sync engine -----------------------------------------------------------
-function profileToWire(p, dirtyOnly = false) {
+function profileToWire(p) {
   return {
     id: p.id,
     name: p.name,
@@ -92,6 +93,7 @@ function profileToWire(p, dirtyOnly = false) {
     birthTime: p.birthTime,
     timeUnknown: !!p.timeUnknown,
     location: p.location || null,
+    aiAccess: getAiAccess(p.id),
     updatedAt: p.updatedAt,
     createdAt: p.createdAt
   };
@@ -143,6 +145,7 @@ export async function syncNow({ firstMerge = false } = {}) {
         timeUnknown: c.timeUnknown,
         location: c.location
       });
+      setAiAccess(c.id, !!c.aiAccess);
       applied++;
     }
 

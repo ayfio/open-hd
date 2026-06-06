@@ -18,23 +18,27 @@ import { D1Dialect } from 'kysely-d1';
 
 async function sendMagicLinkEmail(env, { email, url }) {
   if (env.SEND_EMAIL) {
-    // Cloudflare Email Service binding (configure: sending domain on
-    // openhumandesign.com, binding name SEND_EMAIL in wrangler.jsonc)
-    const { EmailMessage } = await import('cloudflare:email');
-    const raw = [
-      `From: Open Human Design <hello@openhumandesign.com>`,
-      `To: ${email}`,
-      `Subject: Your sign-in link`,
-      `MIME-Version: 1.0`,
-      `Content-Type: text/plain; charset=utf-8`,
-      ``,
-      `Sign in to Open Human Design:`,
-      ``,
-      url,
-      ``,
-      `This link expires in 5 minutes. If you didn't request it, ignore this email.`
-    ].join('\r\n');
-    await env.SEND_EMAIL.send(new EmailMessage('hello@openhumandesign.com', email, raw));
+    // Cloudflare Email Service binding — domain onboarded via
+    // `wrangler email sending enable openhumandesign.com`.
+    await env.SEND_EMAIL.send({
+      to: email,
+      from: { email: 'hello@openhumandesign.com', name: 'Open Human Design' },
+      subject: 'Your sign-in link',
+      text: [
+        'Sign in to Open Human Design:',
+        '',
+        url,
+        '',
+        "This link expires in 5 minutes. If you didn't request it, you can ignore this email."
+      ].join('\n'),
+      html: [
+        '<div style="font-family:system-ui,sans-serif;max-width:420px;margin:0 auto;padding:24px">',
+        '<h2 style="font-weight:500">Sign in to Open Human Design</h2>',
+        `<p><a href="${url}" style="display:inline-block;background:#c47a2a;color:#fff;text-decoration:none;padding:10px 22px;border-radius:8px">Sign in</a></p>`,
+        '<p style="color:#777;font-size:13px">This link expires in 5 minutes. If you didn’t request it, you can ignore this email.</p>',
+        '</div>'
+      ].join('')
+    });
     return;
   }
   // Local dev / email not configured yet: surface the link in logs.

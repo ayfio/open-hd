@@ -35,17 +35,56 @@ import {
 // ---------------------------------------------------------------------------
 
 const BIRTH_INPUT_SCHEMA = {
-  type: 'object',
-  properties: {
-    birthDate: { type: 'string', description: 'YYYY-MM-DD (local date of birth)' },
-    birthTime: { type: 'string', description: 'HH:MM 24h local. Omit if unknown (noon is used and noted — minutes matter in Human Design).' },
-    place: { type: 'string', description: 'Birth place, e.g. "Boulder, Colorado". Geocoded server-side; the historical UTC offset at the birth moment is resolved automatically (handles DST and timezone history). Preferred over utcOffset.' },
-    lat: { type: 'number', description: 'Latitude — only needed if place is not given' },
-    lon: { type: 'number', description: 'Longitude — only needed if place is not given' },
-    utcOffset: { type: 'number', description: 'UTC offset in hours at the birth moment (e.g. -6, 5.5). Only use when place is unavailable — you must account for historical DST yourself.' }
-  },
-  required: ['birthDate']
+  oneOf: [
+    {
+      type: 'object',
+      properties: {
+        birthDate: { type: 'string', description: 'YYYY-MM-DD (local date of birth)' },
+        birthTime: { type: 'string', description: 'HH:MM 24h local. Omit if unknown (noon is used and noted — minutes matter in Human Design).' },
+        place: { type: 'string', description: 'Birth place, e.g. "Boulder, Colorado". Geocoded server-side; the historical UTC offset at the birth moment is resolved automatically (handles DST and timezone history). Preferred over utcOffset.' },
+        lat: { type: 'number', description: 'Latitude — only needed if place is not given' },
+        lon: { type: 'number', description: 'Longitude — only needed if place is not given' },
+        utcOffset: { type: 'number', description: 'UTC offset in hours at the birth moment (e.g. -6, 5.5). Only use when place is unavailable — you must account for historical DST yourself.' }
+      },
+      required: ['birthDate']
+    },
+    {
+      type: 'string',
+      description: 'The name of a saved person (personal connector only) — e.g. "Mom". Use list_people to see who is available.'
+    }
+  ]
 };
+
+/** Resolve "Saved Name" → stored birth data (ai_access-gated, SQL-enforced). */
+async function lookupPerson(ctx, name) {
+  if (!ctx?.userId || !ctx?.env?.DB) {
+    throw new Error(`"${name}": saved names only work on the personal connector (sign in at openhumandesign.com and connect /mcp/my)`);
+  }
+  const { results } = await ctx.env.DB.prepare(
+    `SELECT * FROM people WHERE user_id = ?1 AND deleted_at IS NULL AND name LIKE ?2 COLLATE NOCASE`
+  ).bind(ctx.userId, name).all();
+
+  if (!results.length) {
+    // Distinguish "doesn't exist" from "exists but AI access is off"
+    throw new Error(`No saved person named "${name}". Use list_people to see who is available, or save_person to add them.`);
+  }
+  const allowed = results.filter(r => r.ai_access);
+  if (!allowed.length) {
+    throw new Error(`"${name}" is saved, but AI access is off for them. Enable it in the app (or re-save via save_person) to let your AI read their chart.`);
+  }
+  if (allowed.length > 1) {
+    throw new Error(`Multiple people named "${name}" — candidates: ${allowed.map(r => `${r.name} (born ${r.birth_date})`).join('; ')}. Ask the user which one.`);
+  }
+  const r = allowed[0];
+  return {
+    birthDate: r.birth_date,
+    birthTime: r.time_unknown ? undefined : r.birth_time,
+    lat: r.loc_lat ?? undefined,
+    lon: r.loc_lon ?? undefined,
+    utcOffset: r.loc_timezone ?? undefined,
+    _savedName: r.name
+  };
+}
 
 /**
  * Geocode a free-form place string. Open-Meteo matches bare names only,
@@ -70,8 +109,11 @@ async function geocodeFlexible(placeStr) {
   return matches.length ? matches : places;
 }
 
-async function resolveBirth(input, label = 'birth') {
-  if (!input || typeof input !== 'object') throw new Error(`${label}: expected an object`);
+async function resolveBirth(input, label = 'birth', ctx = null) {
+  if (typeof input === 'string') {
+    input = await lookupPerson(ctx, input);
+  }
+  if (!input || typeof input !== 'object') throw new Error(`${label}: expected birth data or a saved person's name`);
   const { birthDate } = input;
   if (!birthDate || !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) {
     throw new Error(`${label}.birthDate must be YYYY-MM-DD`);
@@ -108,7 +150,8 @@ async function resolveBirth(input, label = 'birth') {
     birthHour: h + (m || 0) / 60,
     timeUnknown,
     utcOffset,
-    placeNote
+    placeNote,
+    _savedName: input._savedName
   };
 }
 
@@ -216,6 +259,7 @@ const errText = (msg) => ({ content: [{ type: 'text', text: `Error: ${msg}` }], 
 
 function birthMeta(b) {
   return {
+    ...(b._savedName ? { person: b._savedName } : {}),
     input: { birthDate: b.birthDate, birthTime: b.timeUnknown ? 'unknown (noon used — line-level details may be unreliable)' : b.birthTime, utcOffset: b.utcOffset },
     ...(b.placeNote ? { place: b.placeNote } : {})
   };
@@ -242,8 +286,8 @@ const TOOLS = [
       },
       required: ['birth']
     },
-    async handler({ birth, systems = ['human_design'], detail = 'summary' }) {
-      const b = await resolveBirth(birth);
+    async handler({ birth, systems = ['human_design'], detail = 'summary' }, ctx) {
+      const b = await resolveBirth(birth, 'birth', ctx);
       const hd = calculateHumanDesign(b.birthDate, b.birthHour, b.utcOffset);
       const out = { ...birthMeta(b) };
       if (systems.includes('human_design')) out.humanDesign = hdSummary(hd, detail);
@@ -267,8 +311,8 @@ const TOOLS = [
       },
       required: ['personA', 'personB']
     },
-    async handler({ personA, personB }) {
-      const [a, b] = await Promise.all([resolveBirth(personA, 'personA'), resolveBirth(personB, 'personB')]);
+    async handler({ personA, personB }, ctx) {
+      const [a, b] = await Promise.all([resolveBirth(personA, 'personA', ctx), resolveBirth(personB, 'personB', ctx)]);
       const chartA = calculateHumanDesign(a.birthDate, a.birthHour, a.utcOffset);
       const chartB = calculateHumanDesign(b.birthDate, b.birthHour, b.utcOffset);
       const cmp = compareHumanDesign(chartA, chartB);
@@ -298,8 +342,8 @@ const TOOLS = [
       },
       required: ['birth']
     },
-    async handler({ birth, date }) {
-      const b = await resolveBirth(birth);
+    async handler({ birth, date }, ctx) {
+      const b = await resolveBirth(birth, 'birth', ctx);
       const chart = calculateHumanDesign(b.birthDate, b.birthHour, b.utcOffset);
       const d = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : new Date().toISOString().split('T')[0];
       const t = calculateHDTransits(chart, d);
@@ -340,11 +384,11 @@ const TOOLS = [
       },
       required: ['members']
     },
-    async handler({ members }) {
+    async handler({ members }, ctx) {
       if (!Array.isArray(members) || members.length < 2) throw new Error('members: need at least 2 people');
-      const resolved = await Promise.all(members.map((m, i) => resolveBirth(m, m.name || `member ${i + 1}`)));
+      const resolved = await Promise.all(members.map((m, i) => resolveBirth(m, (typeof m === 'string' ? m : m.name) || `member ${i + 1}`, ctx)));
       const charts = resolved.map(b => calculateHumanDesign(b.birthDate, b.birthHour, b.utcOffset));
-      const names = members.map((m, i) => m.name || `Person ${i + 1}`);
+      const names = members.map((m, i) => (typeof m === 'string' ? m : m.name) || resolved[i]._savedName || `Person ${i + 1}`);
       const r = analyzePenta(charts, names);
       return json({
         members: names.map((n, i) => ({ name: n, type: charts[i].type.name, profile: charts[i].profile.numbers })),
@@ -401,24 +445,136 @@ const TOOLS = [
 ];
 
 // ---------------------------------------------------------------------------
+// Personal tools (only on the OAuth-protected /mcp/my endpoint)
+// ---------------------------------------------------------------------------
+
+function wirePerson(r) {
+  return {
+    name: r.name,
+    birthDate: r.birth_date,
+    birthTime: r.time_unknown ? 'unknown' : r.birth_time,
+    place: r.loc_name || null
+  };
+}
+
+const PERSONAL_TOOLS = [
+  {
+    name: 'list_people',
+    description: 'List the user\'s saved people that have AI access enabled. Use their names directly as the birth input of compute_chart / compare_charts / get_transits / analyze_team. Free (not metered).',
+    inputSchema: { type: 'object', properties: {} },
+    async handler(_args, ctx) {
+      const { results } = await ctx.env.DB.prepare(
+        'SELECT * FROM people WHERE user_id = ?1 AND deleted_at IS NULL AND ai_access = 1 ORDER BY name'
+      ).bind(ctx.userId).all();
+      const { hidden } = await ctx.env.DB.prepare(
+        'SELECT COUNT(*) AS hidden FROM people WHERE user_id = ?1 AND deleted_at IS NULL AND ai_access = 0'
+      ).bind(ctx.userId).first();
+      return json({
+        people: results.map(wirePerson),
+        ...(hidden ? { note: `${hidden} more saved ${hidden === 1 ? 'person has' : 'people have'} AI access turned off — they can be enabled in the app.` } : {})
+      });
+    }
+  },
+  {
+    name: 'save_person',
+    description: 'Save a person to the user\'s library so future conversations can reference them by name. Saving through the AI grants AI access automatically (the user is granting it by asking). Confirm with the user before saving someone new.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Name to save them under, e.g. "Mom"' },
+        birth: BIRTH_INPUT_SCHEMA.oneOf[0]
+      },
+      required: ['name', 'birth']
+    },
+    async handler({ name, birth }, ctx) {
+      if (!name || name.length > 200) throw new Error('name required (max 200 chars)');
+      const b = await resolveBirth(birth, 'birth', ctx);
+      const now = new Date().toISOString();
+      const id = crypto.randomUUID();
+      await ctx.env.DB.prepare(`
+        INSERT INTO people (user_id, id, name, birth_date, birth_time, time_unknown,
+                            loc_lat, loc_lon, loc_timezone, loc_iana, loc_name,
+                            ai_access, created_at, updated_at, deleted_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12, ?12, NULL)
+      `).bind(
+        ctx.userId, id, name,
+        b.birthDate, b.timeUnknown ? '12:00' : b.birthTime, b.timeUnknown ? 1 : 0,
+        b.placeNote?.lat ?? birth.lat ?? null,
+        b.placeNote?.lon ?? birth.lon ?? null,
+        b.utcOffset,
+        b.placeNote?.ianaTimezone ?? null,
+        b.placeNote?.resolved ?? null,
+        now
+      ).run();
+      return json({ saved: name, ...birthMeta(b), note: 'AI access enabled. They will sync to the user\'s devices.' });
+    }
+  },
+  {
+    name: 'delete_person',
+    description: 'Remove a saved person from the user\'s library. Always confirm with the user first — this syncs to all their devices.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name']
+    },
+    async handler({ name }, ctx) {
+      const person = await lookupPerson(ctx, name);
+      const now = new Date().toISOString();
+      await ctx.env.DB.prepare(
+        'UPDATE people SET deleted_at = ?1, updated_at = ?1 WHERE user_id = ?2 AND name = ?3 COLLATE NOCASE AND deleted_at IS NULL'
+      ).bind(now, ctx.userId, person._savedName).run();
+      return json({ deleted: person._savedName });
+    }
+  }
+];
+
+// ---------------------------------------------------------------------------
+// Metering — chart-units, free tier 50/month (docs/PLATFORM.md §pricing)
+// ---------------------------------------------------------------------------
+
+const METERED = new Set(['compute_chart', 'compare_charts', 'get_transits', 'analyze_team']);
+const FREE_UNITS_PER_MONTH = 50;
+
+async function meterOrThrow(ctx) {
+  const month = new Date().toISOString().slice(0, 7);
+  const ent = await ctx.env.DB.prepare('SELECT plan FROM entitlements WHERE user_id = ?1')
+    .bind(ctx.userId).first();
+  if (ent?.plan === 'supporter') return; // unlimited (fair use)
+
+  const row = await ctx.env.DB.prepare('SELECT units FROM usage WHERE user_id = ?1 AND month = ?2')
+    .bind(ctx.userId, month).first();
+  if ((row?.units || 0) >= FREE_UNITS_PER_MONTH) {
+    throw new Error(`Monthly free limit reached (${FREE_UNITS_PER_MONTH} chart-units). Resets next month — or support the project ($3/mo or $20/yr at openhumandesign.com) for unlimited. list_people and get_descriptions remain free.`);
+  }
+  await ctx.env.DB.prepare(`
+    INSERT INTO usage (user_id, month, units) VALUES (?1, ?2, 1)
+    ON CONFLICT (user_id, month) DO UPDATE SET units = units + 1
+  `).bind(ctx.userId, month).run();
+}
+
+// ---------------------------------------------------------------------------
 // Server factory + request handler (stateless)
 // ---------------------------------------------------------------------------
 
-function buildServer() {
+function buildServer(ctx) {
+  const personal = !!ctx?.userId;
+  const tools = personal ? [...TOOLS, ...PERSONAL_TOOLS] : TOOLS;
+
   const server = new Server(
-    { name: 'open-human-design', version: '0.3.0' },
+    { name: personal ? 'open-human-design-personal' : 'open-human-design', version: '0.4.0' },
     { capabilities: { tools: {} } }
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }))
+    tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }))
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const tool = TOOLS.find(t => t.name === request.params.name);
+    const tool = tools.find(t => t.name === request.params.name);
     if (!tool) return errText(`Unknown tool: ${request.params.name}`);
     try {
-      return await tool.handler(request.params.arguments || {});
+      if (personal && METERED.has(tool.name)) await meterOrThrow(ctx);
+      return await tool.handler(request.params.arguments || {}, ctx);
     } catch (err) {
       return errText(err.message || String(err));
     }
@@ -427,8 +583,14 @@ function buildServer() {
   return server;
 }
 
-export async function handleMcpRequest(request) {
-  const server = buildServer();
+/**
+ * @param {Request} request
+ * @param {object} [env] - Worker env (DB needed for personal tools)
+ * @param {object} [props] - OAuth props ({ userId, email }) on /mcp/my
+ */
+export async function handleMcpRequest(request, env = null, props = null) {
+  const ctx = props?.userId ? { userId: props.userId, email: props.email, env } : { env };
+  const server = buildServer(ctx);
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless — fresh instance per request
     enableJsonResponse: true

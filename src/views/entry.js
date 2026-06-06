@@ -201,7 +201,8 @@ export function setupEntryView({ onSubmit }) {
       birthTime,
       timeUnknown: timeUnknown.checked,
       timezone,
-      location
+      location,
+      aiAccess: document.getElementById('ai-access')?.checked || false
     });
   });
 

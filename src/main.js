@@ -8,7 +8,7 @@
 
 import { computeChart, sensitivityCheck } from './lib/chartdata.js';
 import { esc } from './lib/format.js';
-import { listPeople, getPerson, savePerson, deletePerson, birthFromPerson, getLastPersonId, setLastPersonId, enableSync } from './lib/people.js';
+import { listPeople, getPerson, savePerson, deletePerson, birthFromPerson, getLastPersonId, setLastPersonId, enableSync, setAiAccess } from './lib/people.js';
 import { syncAvailable, getSessionUser, requestMagicLink, signOut, startSync } from './lib/sync.js';
 import { paramsToBirth, birthToParams, shareUrl } from './lib/share.js';
 import { setupEntryView } from './views/entry.js';
@@ -142,6 +142,7 @@ function loadBirth(birth, { save = false } = {}) {
     try {
       const saved = savePerson(birth);
       resolved = { ...birth, id: saved.id };
+      if (birth.aiAccess) setAiAccess(saved.id, true);
     } catch (e) {
       console.warn('Could not save person:', e);
     }

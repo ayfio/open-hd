@@ -95,6 +95,29 @@ export function birthFromPerson(p) {
   };
 }
 
+// --- AI access (per-person MCP visibility) --------------------------------
+// Product metadata, deliberately NOT in the engine's profile schema —
+// stored alongside and carried over sync (docs/PLATFORM.md §ai_access).
+const AI_ACCESS_KEY = 'ohd-ai-access';
+
+function readAiAccess() {
+  try { return JSON.parse(localStorage.getItem(AI_ACCESS_KEY) || '{}'); } catch { return {}; }
+}
+
+export function getAiAccess(id) {
+  return !!readAiAccess()[id];
+}
+
+export function setAiAccess(id, value) {
+  try {
+    const map = readAiAccess();
+    if (value) map[id] = true;
+    else delete map[id];
+    localStorage.setItem(AI_ACCESS_KEY, JSON.stringify(map));
+    if (syncEnabled) markDirty(id);
+  } catch { /* private mode */ }
+}
+
 export function getLastPersonId() {
   try { return localStorage.getItem(LAST_KEY); } catch { return null; }
 }

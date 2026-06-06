@@ -23,6 +23,12 @@
       "database_id": "506217ad-e026-403e-bf0a-06d42b609eee"
     }
   ],
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "54cc7860d42848609d72e57119b45e48"
+    }
+  ],
   "observability": {
     "enabled": true
   }
