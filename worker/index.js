@@ -2,10 +2,13 @@
  * Open Human Design — Cloudflare Worker entry.
  *
  * The whole Worker is wrapped by workers-oauth-provider:
- *   /mcp/my       → personal MCP (OAuth-protected; props.userId scopes tools)
+ *   /mcp          → the MCP connector (OAuth-protected; props.userId scopes
+ *                   every tool — saved names, metering, the works). Decision
+ *                   2026-06-06: no anonymous MCP — it would undercut the
+ *                   metering model, and the zero-auth path for power users
+ *                   is the engine's own stdio MCP (npx natalengine-mcp).
  *   /oauth/token, /oauth/register, /.well-known/* → handled by the provider
  *   everything else → defaultHandler below:
- *     /mcp          → public MCP (deterministic compute tools, no auth)
  *     /authorize    → sign-in + consent pages (worker/oauth-ui.js)
  *     /api/auth/*   → better-auth (magic-link sessions for app + consent)
  *     /api/sync     → people sync (LWW deltas; session required)
@@ -60,13 +63,6 @@ const defaultHandler = {
     const url = new URL(request.url);
     const { pathname } = url;
 
-    if (pathname === '/mcp') {
-      if (request.method === 'OPTIONS') {
-        return new Response(null, { status: 204, headers: MCP_CORS });
-      }
-      return withHeaders(await handleMcpRequest(request, env), MCP_CORS);
-    }
-
     if (pathname === '/authorize') {
       return handleAuthorize(request, env);
     }
@@ -98,7 +94,7 @@ const defaultHandler = {
   }
 };
 
-const personalMcpHandler = {
+const mcpHandler = {
   async fetch(request, env, ctx) {
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: MCP_CORS });
@@ -108,8 +104,8 @@ const personalMcpHandler = {
 };
 
 export default new OAuthProvider({
-  apiRoute: '/mcp/my',
-  apiHandler: personalMcpHandler,
+  apiRoute: '/mcp',
+  apiHandler: mcpHandler,
   defaultHandler,
   authorizeEndpoint: '/authorize',
   tokenEndpoint: '/oauth/token',

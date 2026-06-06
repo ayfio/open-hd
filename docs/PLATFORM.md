@@ -135,7 +135,14 @@ BirthInput = { birthDate, birthTime?, place? }        // place geocoded + tz-res
            | "Saved Name"                              // Phase 4+, signed-in only
 ```
 
-**Phase 2 — five tools, no auth needed** (compute is deterministic math on public data):
+> **Decision 2026-06-06: the hosted MCP requires sign-in.** A free anonymous endpoint
+> would undercut the metering model (unlimited anonymous compute beside a 50-unit
+> signed-in tier is incoherent), and every connector becoming an account feeds the
+> supporter funnel. The zero-auth path for power users is the engine's own stdio MCP
+> (`npx natalengine-mcp`) — and self-hosters can run their own Worker. One URL:
+> `openhumandesign.com/mcp`, OAuth from the first request.
+
+**The five compute tools** (deterministic math; metered at 1 unit each):
 
 | Tool | Intent it answers | Metered |
 |---|---|---|

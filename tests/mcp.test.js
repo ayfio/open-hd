@@ -39,7 +39,7 @@ test('initialize handshake', async () => {
   assert.equal(result.serverInfo.name, 'open-human-design');
 });
 
-test('tools/list exposes the five Phase-2 tools', async () => {
+test('tools/list exposes the five compute tools without auth props', async () => {
   const { tools } = await rpc('tools/list');
   const names = tools.map(t => t.name).sort();
   assert.deepEqual(names, ['analyze_team', 'compare_charts', 'compute_chart', 'get_descriptions', 'get_transits']);
@@ -47,6 +47,72 @@ test('tools/list exposes the five Phase-2 tools', async () => {
     assert.ok(t.description.length > 40, `${t.name} needs a real description`);
     assert.ok(t.inputSchema.type === 'object');
   }
+});
+
+// --- Personal toolset (with OAuth props + stub D1) -------------------------
+
+function stubDb(rows = []) {
+  return {
+    prepare(sql) {
+      return {
+        bind() {
+          return {
+            all: async () => ({ results: rows }),
+            first: async () => (sql.includes('COUNT') ? { hidden: 0, cnt: rows.length, units: 0 } : rows[0] || null),
+            run: async () => ({})
+          };
+        }
+      };
+    }
+  };
+}
+
+async function rpcPersonal(method, params, db) {
+  const res = await handleMcpRequest(new Request('http://localhost/mcp', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params })
+  }), { DB: db || stubDb() }, { userId: 'user-1', email: 't@example.com' });
+  const body = await res.json();
+  assert.ok(!body.error, JSON.stringify(body.error));
+  return body.result;
+}
+
+test('personal props expose all eight tools', async () => {
+  const { tools } = await rpcPersonal('tools/list');
+  const names = tools.map(t => t.name).sort();
+  assert.deepEqual(names, ['analyze_team', 'compare_charts', 'compute_chart', 'delete_person',
+    'get_descriptions', 'get_transits', 'list_people', 'save_person']);
+});
+
+test('saved-name birth input resolves through ai_access-gated lookup', async () => {
+  const db = stubDb([{
+    id: 'p1', user_id: 'user-1', name: 'Mom', birth_date: '1962-04-11',
+    birth_time: '08:15', time_unknown: 0, loc_lat: 39.7, loc_lon: -105,
+    loc_timezone: -7, loc_iana: 'America/Denver', loc_name: 'Denver',
+    ai_access: 1, deleted_at: null
+  }]);
+  const result = await rpcPersonal('tools/call', { name: 'compute_chart', arguments: { birth: 'Mom' } }, db);
+  const out = JSON.parse(result.content[0].text);
+  assert.equal(out.person, 'Mom');
+  assert.ok(out.humanDesign.type);
+});
+
+test('ai_access off → helpful refusal, not silence', async () => {
+  const db = stubDb([{
+    id: 'p1', user_id: 'user-1', name: 'Mom', birth_date: '1962-04-11',
+    birth_time: '08:15', time_unknown: 0, loc_timezone: -7,
+    ai_access: 0, deleted_at: null
+  }]);
+  const result = await rpcPersonal('tools/call', { name: 'compute_chart', arguments: { birth: 'Mom' } }, db);
+  assert.ok(result.isError);
+  assert.match(result.content[0].text, /AI access is off/);
+});
+
+test('saved names rejected without auth props', async () => {
+  const result = await rpc('tools/call', { name: 'compute_chart', arguments: { birth: 'Mom' } });
+  assert.ok(result.isError);
+  assert.match(result.content[0].text, /personal connector|sign in/i);
 });
 
 test('compute_chart with explicit offset', async () => {
