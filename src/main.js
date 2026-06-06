@@ -286,6 +286,24 @@ function init() {
   if (fromUrl) {
     loadBirth(fromUrl, { save: false });
     if (deepLinkView && VIEWS.includes(deepLinkView)) showView(deepLinkView);
+    // Shared-chart landing: someone opened a link to a chart that isn't
+    // theirs — invite them to make their own (the viral loop).
+    if (!getLastPersonId() && fromUrl.name) {
+      const banner = document.getElementById('shared-cta');
+      if (banner) {
+        banner.innerHTML = `Looking at <strong>${esc(fromUrl.name)}</strong>'s chart —
+          <button id="make-own" class="link-button" style="display:inline;margin:0;font-size:inherit">make your own free chart →</button>`;
+        banner.classList.remove('hidden');
+        document.getElementById('make-own').addEventListener('click', () => {
+          currentData = null;
+          history.replaceState(null, '', window.location.pathname);
+          banner.classList.add('hidden');
+          document.querySelectorAll('.view-section, .chart-view').forEach(s => s.classList.add('hidden'));
+          document.getElementById('birth-entry').classList.remove('hidden');
+          renderPeopleSwitcher();
+        });
+      }
+    }
     return;
   }
   const lastId = getLastPersonId();

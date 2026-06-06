@@ -93,14 +93,22 @@ function renderFoundation(chart, sensitivity = null) {
   let reliabilityHtml = '';
   if (sensitivity) {
     const solid = sensitivity.shifts.length === 0;
-    reliabilityHtml = `
-      <div class="reliability ${solid ? 'reliability-solid' : 'reliability-soft'}">
+    // Lead with reassurance and what to do — never alarm. (A founder-flagged
+    // copy fix: the old wording read as a warning about the chart itself.)
+    reliabilityHtml = solid
+      ? `
+      <div class="reliability reliability-solid">
         <span class="reliability-dot"></span>
-        ${solid
-          ? 'Stable chart — a ±15 minute birth-time error would not change any core element.'
-          : `Time-sensitive chart — with a ±15 minute birth-time error, ${sensitivity.shifts.join(', ')} could shift. Core elements that hold: ${sensitivity.stable.join(', ') || 'none'}.`}
-      </div>
-    `;
+        <span>Solid chart — even if your birth time were off by 15 minutes, nothing here would change.</span>
+      </div>`
+      : `
+      <div class="reliability reliability-soft">
+        <span class="reliability-dot"></span>
+        <span>If your birth time is exact (like from a birth certificate), you're all set.
+        If it could be off by 15+ minutes, your <strong>${esc(sensitivity.shifts.join(' and '))}</strong>
+        ${sensitivity.shifts.length === 1 ? 'sits' : 'sit'} near a boundary and ${sensitivity.shifts.length === 1 ? 'is' : 'are'} worth double-checking.
+        ${sensitivity.stable.length ? `Your ${esc(sensitivity.stable.join(', '))} hold either way.` : ''}</span>
+      </div>`;
   }
   const crossName = chart.incarnationCross?.fullName || chart.incarnationCross?.name || 'Unknown';
   const circuitDominant = chart.circuitAnalysis?.dominant;

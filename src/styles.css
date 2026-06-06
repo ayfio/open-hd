@@ -1174,6 +1174,14 @@ body {
 .reliability-solid .reliability-dot { background: #27ae60; }
 .reliability-soft .reliability-dot { background: var(--accent); }
 
+.shared-cta {
+  text-align: center;
+  padding: 10px 24px;
+  background: var(--accent-soft);
+  font-size: 13.5px;
+  color: var(--text);
+}
+
 /* =============================================
    Panel content additions
    ============================================= */
