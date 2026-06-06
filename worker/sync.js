@@ -10,7 +10,9 @@
  * propagate like edits and never resurrect.
  */
 
-const MAX_PEOPLE_FREE = 10; // synced-people cap on the free tier (PLATFORM.md pricing)
+// Generous while we grow — proper tier gating comes with payments later
+// (decision 2026-06-06: make it all work for anyone with an account).
+const MAX_PEOPLE_FREE = 100;
 
 function rowToWire(r) {
   return {

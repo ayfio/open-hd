@@ -533,7 +533,9 @@ const PERSONAL_TOOLS = [
 // ---------------------------------------------------------------------------
 
 const METERED = new Set(['compute_chart', 'compare_charts', 'get_transits', 'analyze_team']);
-const FREE_UNITS_PER_MONTH = 50;
+// Counting from day one (the usage data shapes future pricing), but the
+// ceiling is deliberately high while we grow — gating comes with payments.
+const FREE_UNITS_PER_MONTH = 1000;
 
 async function meterOrThrow(ctx) {
   const month = new Date().toISOString().slice(0, 7);
@@ -544,7 +546,7 @@ async function meterOrThrow(ctx) {
   const row = await ctx.env.DB.prepare('SELECT units FROM usage WHERE user_id = ?1 AND month = ?2')
     .bind(ctx.userId, month).first();
   if ((row?.units || 0) >= FREE_UNITS_PER_MONTH) {
-    throw new Error(`Monthly free limit reached (${FREE_UNITS_PER_MONTH} chart-units). Resets next month — or support the project ($3/mo or $20/yr at openhumandesign.com) for unlimited. list_people and get_descriptions remain free.`);
+    throw new Error(`Monthly limit reached (${FREE_UNITS_PER_MONTH} chart computations). It resets at the start of next month. list_people and get_descriptions remain available.`);
   }
   await ctx.env.DB.prepare(`
     INSERT INTO usage (user_id, month, units) VALUES (?1, ?2, 1)

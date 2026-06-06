@@ -191,6 +191,11 @@ async function setupSync() {
       : `Sign-in didn't complete (${authError}) — try again.`;
   }
 
+  button.addEventListener('click', () => popover.classList.toggle('hidden'));
+  document.addEventListener('click', (e) => {
+    if (!popover.contains(e.target) && e.target !== button) popover.classList.add('hidden');
+  });
+
   if (user) {
     enableSync();
     startSync({
@@ -200,22 +205,45 @@ async function setupSync() {
       }
     });
     button.textContent = '✓ Synced';
-    button.title = `Signed in as ${user.email} — click to sign out`;
-    button.addEventListener('click', async () => {
-      if (confirm(`Signed in as ${user.email}. Sign out?\n\nYour charts stay on this device.`)) {
-        await signOut();
-        window.location.reload();
+    button.title = `Signed in as ${user.email}`;
+
+    const mcpUrl = `${window.location.origin}/mcp`;
+    popover.innerHTML = `
+      <div class="panel-title">Account</div>
+      <p class="panel-intro">Signed in as <strong>${esc(user.email)}</strong> — your saved people sync across devices.</p>
+
+      <div class="panel-title" style="margin-top:14px">Connect your AI</div>
+      <p class="panel-intro">Let Claude (or any MCP-capable AI) pull up your charts by name.</p>
+      <div class="mcp-url-row">
+        <code id="mcp-url">${esc(mcpUrl)}</code>
+        <button id="copy-mcp" class="btn-secondary btn-small">Copy</button>
+      </div>
+      <ol class="mcp-steps">
+        <li>In Claude: <em>Settings → Connectors → Add custom connector</em>, paste the URL</li>
+        <li>Approve the connection (uses this same sign-in)</li>
+        <li>Tick <em>"Let my connected AI see this person"</em> when saving people here</li>
+        <li>Ask: <em>"Pull up Mom's chart"</em></li>
+      </ol>
+      <button id="sign-out" class="link-button" style="margin:10px 0 0">Sign out (charts stay on this device)</button>
+    `;
+    document.getElementById('copy-mcp').addEventListener('click', async (e) => {
+      try {
+        await navigator.clipboard.writeText(mcpUrl);
+        e.target.textContent = 'Copied ✓';
+      } catch {
+        e.target.textContent = 'Copy failed';
       }
+      setTimeout(() => { e.target.textContent = 'Copy'; }, 2000);
+    });
+    document.getElementById('sign-out').addEventListener('click', async () => {
+      await signOut();
+      window.location.reload();
     });
     return;
   }
 
   button.textContent = 'Sync';
-  button.title = 'Sign in to sync your charts across devices';
-  button.addEventListener('click', () => popover.classList.toggle('hidden'));
-  document.addEventListener('click', (e) => {
-    if (!popover.contains(e.target) && e.target !== button) popover.classList.add('hidden');
-  });
+  button.title = 'Sign in to sync your charts and connect your AI';
 
   document.getElementById('sync-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -224,7 +252,7 @@ async function setupSync() {
     status.textContent = 'Sending…';
     try {
       await requestMagicLink(email);
-      status.textContent = 'Check your email for the sign-in link ✓';
+      status.textContent = 'Check your email — the sign-in button works once. ✓';
     } catch {
       status.textContent = 'Could not send — sync lives at openhumandesign.com';
     }
