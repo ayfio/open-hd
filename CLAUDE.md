@@ -21,7 +21,7 @@ npx wrangler deploy  # Deploy to Cloudflare (needs wrangler login)
 
 ## Setup & hosting
 
-`natalengine` comes from npm (`^1.2.0`). For engine development, clone
+`natalengine` comes from npm (`^1.3.0`). For engine development, clone
 [Unforced-Dev/natal-engine](https://github.com/Unforced-Dev/natalengine) as a sibling and
 `npm link`/`file:` it temporarily — but published versions are the default.
 
@@ -74,7 +74,7 @@ Single-page app, 4 views. State lives in main.js (`currentData`); views read it 
 
 ## Dependencies
 
-- `natalengine` (file link, see Setup) — all calculation; audited against 5 reference charts
+- `natalengine` (npm `^1.3.0`) — all calculation (incl. pure SVG renderers); audited against 5 reference charts
 - `vite` — build; `playwright-core` — e2e (drives system Chrome)
 
 ## Design System
