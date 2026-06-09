@@ -23,6 +23,7 @@ import { createAuth, getSession } from './auth.js';
 import { handleSync } from './sync.js';
 import { handleAuthorize, verifyInterstitial } from './oauth-ui.js';
 import { handleOgImage, handleChartSvg, rewriteShareMeta } from './og.js';
+import { handleSeoPage, handleSitemap, handleRobots } from './seo.js';
 
 const MCP_CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -101,6 +102,12 @@ const defaultHandler = {
 
       return withHeaders(Response.json({ error: 'not found' }, { status: 404 }), cors);
     }
+
+    // SEO: server-rendered reference pages (crawlable HTML the SPA can't give).
+    if (pathname === '/sitemap.xml') return handleSitemap();
+    if (pathname === '/robots.txt') return handleRobots();
+    const seoPage = await handleSeoPage(request);
+    if (seoPage) return seoPage;
 
     // Static assets (SPA) — wrangler serves env.ASSETS with SPA fallback.
     // Share links (/?d=…) get their OpenGraph tags rewritten per-chart so
