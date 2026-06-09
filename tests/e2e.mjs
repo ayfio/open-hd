@@ -155,6 +155,38 @@ await check('reload auto-restores last chart', async () => {
   if (!/E2E Person/.test(banner)) throw new Error(banner.slice(0, 120));
 });
 
+// --- P1-7: edit name + AI access through the switcher modal ---
+await check('edit person renames in place (P1-7)', async () => {
+  await page.selectOption('#people-switcher', '__edit');
+  await page.waitForSelector('.modal #edit-name', { timeout: 3000 });
+  await page.fill('.modal #edit-name', 'Renamed Person');
+  await page.click('.modal #edit-save');
+  await page.waitForSelector('.modal', { state: 'detached', timeout: 3000 });
+  const banner = await page.textContent('#type-banner');
+  if (!/Renamed Person/.test(banner)) throw new Error('rename not reflected: ' + banner.slice(0, 120));
+});
+
+// --- P1-11: a shared chart stays comparable after "make your own" ---
+await check('shared person retained for comparison (P1-11)', async () => {
+  const ctx = await browser.newContext();
+  const p2 = await ctx.newPage();
+  p2.on('pageerror', err => fail('P1-11 page JS error', err.message));
+  await p2.goto(`${BASE}?d=1980-05-10&t=09:00&tz=2&n=GuestPal`);
+  await p2.click('#make-own', { timeout: 5000 });
+  await p2.fill('#birth-name', 'Me');
+  await p2.fill('#birth-date', '1990-06-15');
+  await p2.fill('#birth-time', '14:30');
+  await p2.fill('#birth-place', 'Boulder');
+  await p2.waitForSelector('.place-result', { timeout: 8000 });
+  await p2.click('.place-result:first-child');
+  await p2.click('#birth-form button[type=submit]');
+  await p2.waitForSelector('#chart-view:not(.hidden)', { timeout: 5000 });
+  await p2.click('.nav-link[data-view="connection"]');
+  const opts = await p2.textContent('#conn-person');
+  if (!/GuestPal/.test(opts)) throw new Error('shared guest not retained in picker: ' + opts);
+  await ctx.close();
+});
+
 await browser.close();
 
 console.log(failures ? `\n${failures} FAILED` : '\nAll e2e checks passed');

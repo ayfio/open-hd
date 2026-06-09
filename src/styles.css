@@ -1088,6 +1088,53 @@ body {
   font-weight: 500;
 }
 
+/* Edit-person modal (P1-7) */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.modal {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  padding: 22px;
+  width: 100%;
+  max-width: 360px;
+}
+.modal-title { font-family: var(--font-serif); font-size: 19px; margin-bottom: 16px; }
+.modal-field { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; }
+.modal-field input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 5px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+}
+.modal-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+  cursor: pointer;
+}
+.modal-check input { margin-top: 2px; flex-shrink: 0; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
 .link-button {
   display: block;
   background: none;

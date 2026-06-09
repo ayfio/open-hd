@@ -118,6 +118,13 @@ export function setAiAccess(id, value) {
   } catch { /* private mode */ }
 }
 
+// Session-only: a chart someone arrived at through a share link. Kept in
+// memory (not persisted) so that after they "make their own", the shared
+// person is still available to compare against instead of vanishing.
+let sharedGuest = null;
+export function setSharedGuest(birth) { sharedGuest = birth; }
+export function getSharedGuest() { return sharedGuest; }
+
 export function getLastPersonId() {
   try { return localStorage.getItem(LAST_KEY); } catch { return null; }
 }

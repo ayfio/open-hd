@@ -6,7 +6,7 @@
 import { compareHumanDesign } from 'natalengine';
 import { renderBodygraph } from '../bodygraph.js';
 import { computeChart } from '../lib/chartdata.js';
-import { listPeople, birthFromPerson } from '../lib/people.js';
+import { listPeople, birthFromPerson, getSharedGuest } from '../lib/people.js';
 import { createPlaceSearch } from '../lib/placesearch.js';
 import { esc } from '../lib/format.js';
 import { getCurrentChart } from './chart.js';
@@ -33,7 +33,11 @@ export function renderConnectionView() {
     .filter(p => p.id !== current?.birth?.id)
     .map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`)
     .join('');
-  select.innerHTML = `<option value="">— enter birth data below —</option>${options}`;
+  // A chart they arrived at via a share link stays comparable (P1-11).
+  const guest = getSharedGuest();
+  const guestOpt = guest?.name && guest?.birthDate && guest.id !== current?.birth?.id
+    ? `<option value="__guest">${esc(guest.name)} (shared chart)</option>` : '';
+  select.innerHTML = `<option value="">— enter birth data below —</option>${guestOpt}${options}`;
   select.onchange = () => {
     document.getElementById('conn-manual').classList.toggle('hidden', !!select.value);
   };
@@ -46,7 +50,9 @@ function runComparison() {
   const select = document.getElementById('conn-person');
   let birthB = null;
 
-  if (select.value) {
+  if (select.value === '__guest') {
+    birthB = getSharedGuest();
+  } else if (select.value) {
     const person = listPeople().find(p => p.id === select.value);
     if (person) birthB = birthFromPerson(person);
   } else {

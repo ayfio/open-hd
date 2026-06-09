@@ -8,7 +8,7 @@
 
 import { computeChart, sensitivityCheck } from './lib/chartdata.js';
 import { esc } from './lib/format.js';
-import { listPeople, getPerson, savePerson, deletePerson, birthFromPerson, getLastPersonId, setLastPersonId, enableSync, setAiAccess } from './lib/people.js';
+import { listPeople, getPerson, savePerson, deletePerson, birthFromPerson, getLastPersonId, setLastPersonId, enableSync, setAiAccess, getAiAccess, setSharedGuest } from './lib/people.js';
 import { syncAvailable, getSessionUser, requestMagicLink, signOut, startSync } from './lib/sync.js';
 import { paramsToBirth, birthToParams, shareUrl } from './lib/share.js';
 import { setupEntryView } from './views/entry.js';
@@ -98,6 +98,7 @@ function renderPeopleSwitcher() {
     ${unsaved}
     ${people.map(p => `<option value="${esc(p.id)}" ${p.id === currentId ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
     <option value="__new">+ New chart…</option>
+    ${currentId ? '<option value="__edit">Edit name &amp; AI access…</option>' : ''}
     ${currentId ? '<option value="__delete">Remove this person…</option>' : ''}
   `;
 }
@@ -130,9 +131,59 @@ function setupPeopleSwitcher() {
       renderPeopleSwitcher();
       return;
     }
+    if (value === '__edit') {
+      if (currentData?.birth?.id) openEditPerson(currentData.birth);
+      renderPeopleSwitcher(); // reset the select back to the loaded person
+      return;
+    }
     if (value === '__current') return;
     const person = getPerson(value);
     if (person) loadBirth(birthFromPerson(person), { save: false });
+  });
+}
+
+// Edit a saved person — rename (re-save under the same id) and toggle whether
+// the AI connector may read this chart. (P1-7: backend existed, no UI did.)
+function openEditPerson(birth) {
+  const id = birth.id;
+  if (!id) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Edit chart">
+      <div class="modal-title">Edit chart</div>
+      <label class="modal-field">Name
+        <input type="text" id="edit-name" value="${esc(birth.name || '')}" autocomplete="off">
+      </label>
+      <label class="modal-check">
+        <input type="checkbox" id="edit-ai" ${getAiAccess(id) ? 'checked' : ''}>
+        <span>Let my AI read this chart through the connector</span>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="edit-cancel">Cancel</button>
+        <button type="button" class="btn-primary" id="edit-save">Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const nameInput = overlay.querySelector('#edit-name');
+  nameInput.focus();
+  nameInput.select();
+
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('#edit-cancel').addEventListener('click', close);
+  overlay.querySelector('#edit-save').addEventListener('click', () => {
+    const newName = nameInput.value.trim() || birth.name;
+    const aiOn = overlay.querySelector('#edit-ai').checked;
+    try {
+      savePerson({ ...birth, name: newName }); // same id → rename in place
+      setAiAccess(id, aiOn);
+    } catch (e) { console.warn('Could not update person:', e); }
+    close();
+    if (currentData?.birth?.id === id) loadBirth({ ...birth, name: newName }, { save: false });
+    else renderPeopleSwitcher();
   });
 }
 
@@ -298,6 +349,7 @@ function init() {
     // Shared-chart landing: someone opened a link to a chart that isn't
     // theirs — invite them to make their own (the viral loop).
     if (!getLastPersonId() && fromUrl.name) {
+      setSharedGuest(fromUrl); // keep them available to compare after "make your own"
       const banner = document.getElementById('shared-cta');
       if (banner) {
         banner.innerHTML = `Looking at <strong>${esc(fromUrl.name)}</strong>'s chart —
