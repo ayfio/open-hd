@@ -32,6 +32,8 @@ import {
   GATE_DESCRIPTIONS,
   LINE_DESCRIPTIONS,
   CHANNEL_DESCRIPTIONS,
+  HEXAGRAM_DESCRIPTIONS,
+  GENE_KEY_DESCRIPTIONS,
   CENTERS,
   GATES,
   renderBodygraphSVG
@@ -598,7 +600,7 @@ const TOOLS = [
   },
   {
     name: 'get_descriptions',
-    description: 'Interpretive reference text for Human Design elements — use for follow-up depth questions ("what does Gate 34 mean?", "what does my 34.5 line mean?") without recomputing a chart. Each requested gate also returns all 6 line-level interpretations. Free (not metered).',
+    description: 'Interpretive reference text for Human Design elements — use for follow-up depth questions ("what does Gate 34 mean?", "what does my 34.5 line mean?") without recomputing a chart. Each requested gate returns its meaning through THREE traditions: Human Design (keynote, description, all 6 lines), the I Ching hexagram it is built on (judgment/image + 6 line meanings), and the Gene Keys (Shadow→Gift→Siddhi). Free (not metered).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -616,7 +618,9 @@ const TOOLS = [
           description: GATE_DESCRIPTIONS[g].description,
           harmonicGate: GATE_DESCRIPTIONS[g].harmonic,
           center: GATES[g]?.center,
-          lines: LINE_DESCRIPTIONS[g] || undefined
+          lines: LINE_DESCRIPTIONS[g] || undefined,
+          iching: HEXAGRAM_DESCRIPTIONS[g] || undefined,
+          geneKey: GENE_KEY_DESCRIPTIONS[g] || undefined
         }]));
       }
       if (channels.length) {

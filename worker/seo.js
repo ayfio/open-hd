@@ -11,6 +11,7 @@
 import {
   TYPES, PROFILES, AUTHORITIES, CENTERS, GATES, CHANNELS, CIRCUIT_GROUPS,
   GATE_DESCRIPTIONS, LINE_DESCRIPTIONS, CHANNEL_DESCRIPTIONS,
+  HEXAGRAM_DESCRIPTIONS, GENE_KEY_DESCRIPTIONS,
   calculateHumanDesign
 } from 'natalengine';
 import { CELEBRITIES } from './celebrities.js';
@@ -181,11 +182,20 @@ function gatePage(n) {
     <p>Every gate expresses through six lines — the universal line quality coloured by this gate's specific energy. These are the line-level interpretations most apps reserve for paid readings.</p>
     ${linesHtml}
     ${channelsHtml}
+    ${HEXAGRAM_DESCRIPTIONS[n] ? `
+    <h2>The I Ching — Hexagram ${n}, ${esc(HEXAGRAM_DESCRIPTIONS[n].name)}</h2>
+    <p>Gate ${n} is built directly on this hexagram — the ancient oracle Human Design grew out of.</p>
+    <p>${esc(HEXAGRAM_DESCRIPTIONS[n].meaning)}</p>
+    ${[1, 2, 3, 4, 5, 6].map(l => HEXAGRAM_DESCRIPTIONS[n].lines[l] ? `<div class="card line"><h3>Line ${n}.${l}</h3><p>${esc(HEXAGRAM_DESCRIPTIONS[n].lines[l])}</p></div>` : '').join('')}` : ''}
+    ${GENE_KEY_DESCRIPTIONS[n] ? `
+    <h2>The Gene Keys — Gene Key ${n}</h2>
+    <p>In the Gene Keys, the same energy runs a spectrum: Shadow <strong>${esc(GENE_KEY_DESCRIPTIONS[n].shadow)}</strong> → Gift <strong>${esc(GENE_KEY_DESCRIPTIONS[n].gift)}</strong> → Siddhi <strong>${esc(GENE_KEY_DESCRIPTIONS[n].siddhi)}</strong>.</p>
+    <p>${esc(GENE_KEY_DESCRIPTIONS[n].description)}</p>` : ''}
     <h2>Where Gate ${n} sits</h2>
     <p>Gate ${n} lives in the <a href="/center/${center}">${esc(CENTER_NAME(center))}</a>. Explore neighbouring gates: <a href="/gate/${prev}">Gate ${prev}</a> · <a href="/gate/${next}">Gate ${next}</a>.</p>`;
   return shell({
-    title: `Gate ${n}: ${g.name} — meaning, all 6 lines | Human Design`,
-    description: `Gate ${n} (${g.name}) in Human Design: ${d.keynote}. Full meaning plus all six line interpretations — free.`,
+    title: `Gate ${n}: ${g.name} — Human Design, I Ching & Gene Keys`,
+    description: `Gate ${n} (${g.name}): its Human Design meaning and all six lines, the I Ching Hexagram ${n} it comes from, and the Gene Key ${n} spectrum — free.`,
     path: `/gate/${n}`,
     h1: `Gate ${n}: ${g.name}`,
     kicker: `${g.iching} · ${CENTER_NAME(center)} Center`,

@@ -73,6 +73,16 @@ await check('clicking a gate opens detail card', async () => {
   if (!/Gate 34/.test(detail)) throw new Error(detail.slice(0, 120));
 });
 
+await check('lens switcher shows the three traditions', async () => {
+  await page.click('.lens-switch button[data-lens="iching"]');
+  let c = await page.textContent('#lens-content');
+  if (!/Hexagram 34|Power of the Great/.test(c)) throw new Error('I Ching lens: ' + c.slice(0, 100));
+  await page.click('.lens-switch button[data-lens="gk"]');
+  c = await page.textContent('#lens-content');
+  if (!/Majesty|Strength/.test(c)) throw new Error('Gene Keys lens: ' + c.slice(0, 100));
+  await page.click('.lens-switch button[data-lens="hd"]'); // restore default
+});
+
 await check('panel tabs switch content', async () => {
   for (const tab of ['planets', 'variable', 'cross', 'channels', 'gates', 'centers']) {
     await page.click(`.panel-tab[data-panel="${tab}"]`);

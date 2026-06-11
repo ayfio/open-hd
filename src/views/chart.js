@@ -6,6 +6,8 @@ import {
   GATE_DESCRIPTIONS,
   LINE_DESCRIPTIONS,
   CHANNEL_DESCRIPTIONS,
+  HEXAGRAM_DESCRIPTIONS,
+  GENE_KEY_DESCRIPTIONS,
   GATES,
   CHANNELS,
   LINE_NAMES
@@ -230,6 +232,54 @@ function renderFoundation(chart, sensitivity = null, birth = null) {
 // ==========================================
 // Gate detail (from bodygraph / list clicks)
 // ==========================================
+let currentLens = 'hd';
+const LENSES = [['hd', 'Human Design'], ['iching', 'I Ching'], ['gk', 'Gene Keys']];
+
+function gateActiveLines(gateNum, chart) {
+  const s = new Set();
+  for (const g of Object.values(chart.gates.design)) if (g?.gate === gateNum) s.add(g.line);
+  for (const g of Object.values(chart.gates.personality)) if (g?.gate === gateNum) s.add(g.line);
+  return [...s].sort((a, b) => a - b);
+}
+
+/** The interpretive body of the gate card, in the currently selected tradition. */
+function renderLens(gateNum) {
+  const chart = current.chart;
+  const lines = gateActiveLines(gateNum, chart);
+
+  if (currentLens === 'iching') {
+    const hx = HEXAGRAM_DESCRIPTIONS[gateNum];
+    if (!hx) return '<p class="gate-detail-desc">No I Ching reading available.</p>';
+    const lineHtml = lines.map(l => hx.lines?.[l]
+      ? `<div class="gate-detail-line"><strong>Line ${l}</strong><p>${esc(hx.lines[l])}</p></div>` : '').join('');
+    return `
+      <div class="gate-detail-keynote">Hexagram ${gateNum} · ${esc(hx.name)}</div>
+      <p class="gate-detail-desc">${esc(hx.meaning)}</p>
+      ${lineHtml ? `<div class="gate-detail-lines">${lineHtml}</div>` : ''}
+      <p class="lens-note">The I Ching hexagram this gate is built on — Ra drew Human Design from this classical source.</p>`;
+  }
+
+  if (currentLens === 'gk') {
+    const gk = GENE_KEY_DESCRIPTIONS[gateNum];
+    if (!gk) return '<p class="gate-detail-desc">No Gene Keys reading available.</p>';
+    return `
+      <div class="gk-spectrum"><span class="gk-shadow">${esc(gk.shadow)}</span><span class="gk-arrow">→</span><span class="gk-gift">${esc(gk.gift)}</span><span class="gk-arrow">→</span><span class="gk-siddhi">${esc(gk.siddhi)}</span></div>
+      <p class="gate-detail-desc">${esc(gk.description)}</p>
+      <p class="lens-note">Gene Key ${gateNum} · the Shadow → Gift → Siddhi spectrum (Richard Rudd's evolution of Human Design).</p>`;
+  }
+
+  // Human Design (default)
+  const desc = GATE_DESCRIPTIONS[gateNum];
+  const lineHtml = lines.map(l => {
+    const ld = LINE_DESCRIPTIONS[gateNum]?.[l];
+    return ld ? `<div class="gate-detail-line"><strong>Line ${l} · ${esc(ld.keynote)}</strong><p>${esc(ld.description)}</p></div>` : '';
+  }).join('');
+  return `
+    ${desc ? `<div class="gate-detail-keynote">${esc(desc.keynote)}</div>` : ''}
+    ${desc ? `<p class="gate-detail-desc">${esc(desc.description)}</p>` : ''}
+    ${lineHtml ? `<div class="gate-detail-lines">${lineHtml}</div>` : ''}`;
+}
+
 export function showGateDetail(gateNum) {
   if (!current) return;
   const { chart } = current;
@@ -259,30 +309,25 @@ export function showGateDetail(gateNum) {
     `;
   }).join('');
 
-  // Line-level interpretations for the lines activated in this gate.
-  const activeLines = new Set();
-  for (const g of Object.values(chart.gates.design)) if (g?.gate === gateNum) activeLines.add(g.line);
-  for (const g of Object.values(chart.gates.personality)) if (g?.gate === gateNum) activeLines.add(g.line);
-  const lineHtml = [...activeLines].sort().map(line => {
-    const ld = LINE_DESCRIPTIONS[gateNum]?.[line];
-    return ld ? `<div class="gate-detail-line"><strong>Line ${line} · ${esc(ld.keynote)}</strong><p>${esc(ld.description)}</p></div>` : '';
-  }).join('');
-
   const isActive = acts.length > 0;
   detail.innerHTML = `
     <div class="gate-detail-card">
       <button class="gate-detail-close" title="Close">&times;</button>
       <div class="panel-title">Gate ${gateNum}${gate ? ' — ' + esc(gate.name) : ''}</div>
-      ${desc ? `<div class="gate-detail-keynote">${esc(desc.keynote)}</div>` : ''}
       ${acts.length ? `<div class="gate-detail-acts">${acts.join('<br>')}</div>` : '<p class="gate-detail-inactive">Not activated in this chart.</p>'}
-      ${desc ? `<p class="gate-detail-desc">${esc(desc.description)}</p>` : ''}
-      ${lineHtml ? `<div class="gate-detail-lines">${lineHtml}</div>` : ''}
+      <div class="lens-switch">${LENSES.map(([k, label]) => `<button type="button" data-lens="${k}" class="${k === currentLens ? 'active' : ''}">${label}</button>`).join('')}</div>
+      <div id="lens-content">${renderLens(gateNum)}</div>
       ${isActive && channelHtml ? channelHtml : ''}
       ${desc?.harmonic ? `<p class="gate-detail-harmonic">Harmonic gate: <button class="gate-link" data-gate="${desc.harmonic}">Gate ${desc.harmonic}</button>${chart.gates.all.includes(desc.harmonic) ? ' (active — channel formed)' : ' (open — you meet this energy in others)'}</p>` : ''}
     </div>
   `;
   detail.classList.remove('hidden');
   detail.querySelector('.gate-detail-close').addEventListener('click', () => detail.classList.add('hidden'));
+  detail.querySelectorAll('.lens-switch button').forEach(btn => btn.addEventListener('click', () => {
+    currentLens = btn.dataset.lens;
+    detail.querySelectorAll('.lens-switch button').forEach(b => b.classList.toggle('active', b.dataset.lens === currentLens));
+    document.getElementById('lens-content').innerHTML = renderLens(gateNum);
+  }));
   detail.querySelectorAll('.gate-link').forEach(btn =>
     btn.addEventListener('click', () => showGateDetail(parseInt(btn.dataset.gate))));
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
