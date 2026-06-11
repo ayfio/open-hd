@@ -118,6 +118,33 @@ await check('relational highlight links chart ↔ data both ways + pins on click
   await page.click('#gate-detail .gate-detail-close');
 });
 
+await check('centers are interactive: hover lights, click opens center detail, panel ↔ graph', async () => {
+  await page.evaluate(() => document.querySelector('#gate-detail .gate-detail-close')?.click());
+  const fire = (sel, type) => page.$eval(sel, (el, t) =>
+    el.dispatchEvent(new PointerEvent(t, { bubbles: true, pointerType: 'mouse' })), type);
+  // Hover a center on the graph → it lights and the graph dims.
+  await fire('.bg-center[data-center="throat"]', 'pointerover');
+  await page.waitForTimeout(120);
+  if (!await page.$eval('.bg-center[data-center="throat"]', el => el.classList.contains('bg-lit')))
+    throw new Error('throat center did not light on hover');
+  await fire('.bg-center[data-center="throat"]', 'pointerout');
+  // Click a center → its detail card opens with status + gate chips.
+  await page.click('.bg-center[data-center="throat"]');
+  await page.waitForSelector('#gate-detail .center-detail-card[data-center="throat"]', { timeout: 3000 });
+  const txt = await page.textContent('#gate-detail .center-detail-card');
+  if (!/Throat Center/.test(txt)) throw new Error('center detail title missing: ' + txt.slice(0, 80));
+  if (!(await page.$('#gate-detail .gate-chip'))) throw new Error('center detail gate chips missing');
+  // Reverse: hovering the Centers-panel card lights that center on the graph.
+  await page.click('.panel-tab[data-panel="centers"]');
+  await page.waitForSelector('.center-card[data-center="g"]', { timeout: 3000 });
+  await fire('.center-card[data-center="g"]', 'pointerenter');
+  await page.waitForTimeout(120);
+  if (!await page.$eval('.bg-center[data-center="g"]', el => el.classList.contains('bg-lit')))
+    throw new Error('G center not lit from panel-card hover');
+  await fire('.center-card[data-center="g"]', 'pointerleave');
+  await page.evaluate(() => document.querySelector('#gate-detail .gate-detail-close')?.click());
+});
+
 await check('panel tabs switch content', async () => {
   for (const tab of ['planets', 'variable', 'cross', 'channels', 'gates', 'centers']) {
     await page.click(`.panel-tab[data-panel="${tab}"]`);

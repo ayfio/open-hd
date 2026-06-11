@@ -137,30 +137,41 @@ export function rerenderBodygraph(transitGates = null) {
   const container = document.getElementById('bodygraph-container');
   bodygraphApi = renderBodygraph(container, current.chart, {
     onGateClick: showGateDetail,
+    onCenterClick: showCenterDetail,
     onHighlight: highlightPanelRows,
     transitGates: transitGates || undefined
   });
   return bodygraphApi;
 }
 
-// Reverse direction of the bodygraph's relational highlight: when a gate (and
-// its channel) lights up on the graph, light the matching rows in the data
-// panels so the chart and the lists read as one focused object.
-function highlightPanelRows(gates) {
+// Reverse direction of the bodygraph's relational highlight: when a gate/center
+// lights up on the graph, light the matching rows in the data panels so the
+// chart and the lists read as one focused object.
+function highlightPanelRows(sel) {
   document.querySelectorAll('.row-lit').forEach(el => el.classList.remove('row-lit'));
-  if (!gates || !gates.length) return;
-  for (const g of gates) {
+  if (!sel) return;
+  for (const g of sel.gates || []) {
     document
       .querySelectorAll(`#panel-content [data-gate="${g}"], #foundation-panel [data-gate="${g}"], #gate-detail [data-gate="${g}"]`)
+      .forEach(el => el.classList.add('row-lit'));
+  }
+  for (const ck of sel.centers || []) {
+    document
+      .querySelectorAll(`#panel-content [data-center="${ck}"], #gate-detail [data-center="${ck}"]`)
       .forEach(el => el.classList.add('row-lit'));
   }
 }
 
 // Forward direction: hovering a data row lights its gate(s) on the bodygraph.
-// Mouse/pen only — on touch the tap opens the detail (which pins the gate).
+// Mouse/pen only — on touch the tap opens the detail (which pins the selection).
 function wireRowHover(el, gateNum) {
   el.addEventListener('pointerenter', (e) => { if (e.pointerType !== 'touch') bodygraphApi?.highlightGate?.(gateNum); });
   el.addEventListener('pointerleave', (e) => { if (e.pointerType !== 'touch') bodygraphApi?.highlightGate?.(null); });
+}
+
+function wireCenterHover(el, centerKey) {
+  el.addEventListener('pointerenter', (e) => { if (e.pointerType !== 'touch') bodygraphApi?.highlightCenter?.(centerKey); });
+  el.addEventListener('pointerleave', (e) => { if (e.pointerType !== 'touch') bodygraphApi?.highlightCenter?.(null); });
 }
 
 function renderFoundation(chart, sensitivity = null, birth = null) {
@@ -346,7 +357,7 @@ export function showGateDetail(gateNum) {
   // Keep this gate lit on the bodygraph the whole time its card is open, so the
   // chart and the reading stay tethered (whether the click came from the graph
   // or from a data row).
-  bodygraphApi?.setPinned?.(gateNum);
+  bodygraphApi?.setPinned?.({ kind: 'gate', id: gateNum });
   detail.querySelector('.gate-detail-close').addEventListener('click', () => {
     detail.classList.add('hidden');
     bodygraphApi?.setPinned?.(null);
@@ -358,6 +369,85 @@ export function showGateDetail(gateNum) {
   }));
   detail.querySelectorAll('.gate-link').forEach(btn =>
     btn.addEventListener('click', () => showGateDetail(parseInt(btn.dataset.gate))));
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  detail.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
+  detail.querySelector('.gate-detail-close')?.focus({ preventScroll: true });
+}
+
+// ==========================================
+// Center detail (from bodygraph / centers-panel clicks)
+// ==========================================
+/** centerKey -> the rich center object, tagged with its defined/undefined/open status. */
+function centerObjects() {
+  const ce = current.chart.centers;
+  const map = {};
+  for (const c of ce.defined) map[c.key] = { ...c, status: 'defined' };
+  for (const c of ce.undefined) map[c.key] = { ...c, status: c.status || 'undefined' };
+  for (const c of ce.open) map[c.key] = { ...c, status: c.status || 'open' };
+  return map;
+}
+
+export function showCenterDetail(centerKey) {
+  if (!current) return;
+  const { chart } = current;
+  const c = centerObjects()[centerKey];
+  if (!c) return;
+  const detail = document.getElementById('gate-detail');
+  const status = c.status;
+  const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+  const meaning = status === 'defined' ? (c.definedMeaning || c.pressure)
+    : status === 'undefined' ? c.undefinedMeaning : c.openMeaning;
+
+  // Gates that live in this center, active ones marked and clickable.
+  const activeSet = new Set(chart.gates.all);
+  const gatesIn = Object.keys(GATES).map(Number)
+    .filter(g => GATES[g].center === centerKey).sort((a, b) => a - b);
+  const gateChips = gatesIn.map(g =>
+    `<button class="gate-chip ${activeSet.has(g) ? 'active' : ''}" data-gate="${g}" title="Gate ${g}${GATES[g]?.name ? ' — ' + esc(GATES[g].name) : ''}">${g}</button>`).join('');
+
+  // Channels touching this center, marked defined when they're active in the chart.
+  const definedKeys = new Set(chart.channels.map(ch => ch.gates.join('-')));
+  const touching = CHANNELS.filter(ch => ch.centers?.includes(centerKey));
+  const channelHtml = touching.length ? `
+    <div class="center-detail-section">
+      <span class="cd-label">Channels through here</span>
+      <div class="cd-channels">
+        ${touching.map(ch => {
+          const key = ch.gates.join('-');
+          const on = definedKeys.has(key);
+          return `<span class="cd-channel ${on ? 'on' : ''}">${esc(ch.name)} <span class="cd-channel-gates">${key}</span></span>`;
+        }).join('')}
+      </div>
+    </div>` : '';
+
+  detail.innerHTML = `
+    <div class="gate-detail-card center-detail-card" data-center="${centerKey}">
+      <button class="gate-detail-close" title="Close">&times;</button>
+      <div class="panel-title">${esc(c.name)} Center</div>
+      <div class="center-detail-head">
+        <span class="center-status ${status}">${statusLabel}</span>
+        <span class="center-detail-theme">${esc(c.theme || '')}${c.biological ? ` · ${esc(c.biological)}` : ''}</span>
+      </div>
+      <p class="gate-detail-desc">${esc(meaning || '')}</p>
+      ${status !== 'defined' && c.notSelfQuestion ? `<p class="center-notself">${esc(c.notSelfQuestion)}</p>` : ''}
+      <div class="center-detail-section">
+        <span class="cd-label">Gates here</span>
+        <div class="gate-chip-row">${gateChips}</div>
+      </div>
+      ${channelHtml}
+    </div>
+  `;
+  detail.classList.remove('hidden');
+  // Keep the center lit on the bodygraph the whole time its card is open.
+  bodygraphApi?.setPinned?.({ kind: 'center', id: centerKey });
+  detail.querySelector('.gate-detail-close').addEventListener('click', () => {
+    detail.classList.add('hidden');
+    bodygraphApi?.setPinned?.(null);
+  });
+  detail.querySelectorAll('.gate-chip[data-gate]').forEach(btn => {
+    btn.addEventListener('click', () => showGateDetail(parseInt(btn.dataset.gate)));
+    wireRowHover(btn, parseInt(btn.dataset.gate));
+  });
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   detail.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
   detail.querySelector('.gate-detail-close')?.focus({ preventScroll: true });
@@ -393,7 +483,7 @@ export function renderPanelContent(panel) {
 function renderCentersPanel(container) {
   const { chart } = current;
   const card = (c, status, extra = '') => `
-    <div class="center-card ${status}">
+    <div class="center-card ${status}" data-center="${c.key}" tabindex="0" role="button" aria-label="${esc(c.name)} center, ${status}">
       <div class="center-status ${status}">${status === 'defined' ? 'Defined' : status === 'undefined' ? 'Undefined' : 'Open'}</div>
       <div class="center-name">${esc(c.name)}</div>
       <p>${esc(status === 'defined' ? (c.definedMeaning || c.pressure) : status === 'undefined' ? c.undefinedMeaning : c.openMeaning)}</p>
@@ -404,11 +494,16 @@ function renderCentersPanel(container) {
 
   container.innerHTML = `
     <div class="panel-title">Centers (${chart.centers.definedNames.length} defined · ${chart.centers.undefinedNames.length} undefined · ${chart.centers.openNames.length} open)</div>
-    <p class="panel-intro">Defined centers are consistent energy you radiate. Undefined and open centers are where you take in — and amplify — the energy around you; they're your deepest learning.</p>
+    <p class="panel-intro">Defined centers are consistent energy you radiate. Undefined and open centers are where you take in — and amplify — the energy around you; they're your deepest learning. Click any center to see it on your body.</p>
     ${chart.centers.defined.map(c => card(c, 'defined')).join('')}
     ${chart.centers.undefined.map(c => card(c, 'undefined', notSelf(c))).join('')}
     ${chart.centers.open.map(c => card(c, 'open', notSelf(c))).join('')}
   `;
+  container.querySelectorAll('.center-card[data-center]').forEach(el => {
+    el.addEventListener('click', () => showCenterDetail(el.dataset.center));
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showCenterDetail(el.dataset.center); } });
+    wireCenterHover(el, el.dataset.center);
+  });
 }
 
 function renderChannelsPanel(container) {

@@ -485,7 +485,11 @@ body {
   border-radius: var(--radius);
   border: 1px solid var(--border-subtle);
   margin-bottom: 8px;
+  cursor: pointer;
+  transition: background 0.12s, box-shadow 0.12s;
 }
+.center-card:hover { background: var(--bg-sunken); }
+.center-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .center-card.defined { border-left: 3px solid var(--accent); }
 .center-card.undefined { border-left: 3px solid var(--text-tertiary); }
@@ -1380,6 +1384,63 @@ body {
   text-underline-offset: 2px;
 }
 
+/* Center detail card (clicking a center on the body or in the Centers panel) */
+.center-detail-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.center-detail-head .center-status {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.center-detail-head .center-status.defined { color: var(--accent); }
+.center-detail-head .center-status.undefined { color: var(--text-secondary); }
+.center-detail-head .center-status.open { color: var(--text-tertiary); }
+.center-detail-theme { font-size: 12px; color: var(--text-tertiary); }
+.center-detail-section { margin-top: 12px; }
+.cd-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-tertiary);
+  margin-bottom: 7px;
+}
+.gate-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.gate-chip {
+  min-width: 30px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg-sunken);
+  color: var(--text-tertiary);
+  font-family: var(--font);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.gate-chip:hover { border-color: var(--accent); color: var(--text); }
+.gate-chip.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+.cd-channels { display: flex; flex-direction: column; gap: 5px; }
+.cd-channel {
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+.cd-channel.on { color: var(--text); font-weight: 600; }
+.cd-channel-gates { color: var(--text-tertiary); font-weight: 400; font-variant-numeric: tabular-nums; }
+
 /* =============================================
    Reliability indicator
    ============================================= */
@@ -1509,6 +1570,7 @@ body {
 .gate-item.row-lit,
 .gate-pill.row-lit,
 .channel-item.row-lit,
+.center-card.row-lit,
 .foundation-clickable.row-lit {
   background: var(--accent-soft);
   box-shadow: inset 3px 0 0 var(--accent);

@@ -70,6 +70,12 @@ const SHAPE_KEY_MAP = {
   Spleen: 'spleen', SolarPlexus: 'solar', Root: 'root'
 };
 
+const CENTER_DISPLAY = {
+  head: 'Head', ajna: 'Ajna', throat: 'Throat', g: 'G',
+  heart: 'Ego', spleen: 'Spleen', solar: 'Solar Plexus',
+  sacral: 'Sacral', root: 'Root'
+};
+
 // gate -> [channels containing it]
 const GATE_CHANNELS = {};
 for (const ch of CHANNELS) {
@@ -228,6 +234,12 @@ export function renderBodygraph(container, chart, opts = {}) {
       path.classList.add('bg-reveal');
       path.style.animationDelay = `${i * 70}ms`;
     }
+    if (interactive) {
+      path.setAttribute('tabindex', '0');
+      path.setAttribute('role', 'button');
+      path.setAttribute('cursor', 'pointer');
+      path.setAttribute('aria-label', `${CENTER_DISPLAY[centerKey] || centerKey} center, ${defined ? 'defined' : 'undefined'}`);
+    }
     centerPathEls[centerKey] = path;
     centerGroup.appendChild(path);
   });
@@ -285,52 +297,69 @@ export function renderBodygraph(container, chart, opts = {}) {
   svg.appendChild(gateGroup);
 
   // ---------- Highlight machinery ----------
-  // One selected gate lights itself, its channel partner (when the channel is
-  // defined), and the center(s) it touches — and dims everything else, so the
-  // chart reads as one focused object. `pinned` keeps a clicked gate lit while
-  // its detail card is open; hovering another gate previews it, and pointer-out
-  // reverts to the pinned gate. `opts.onHighlight(gates|null)` lets the host
+  // A selection is a gate OR a center. Selecting a gate lights it, its channel
+  // partner (when defined), and the center(s) it touches; selecting a center
+  // lights the center and the active gates inside it. Everything else dims, so
+  // the chart reads as one focused object. `pinned` keeps a selection lit while
+  // its detail card is open; hovering previews, and pointer-out reverts to the
+  // pinned selection. `opts.onHighlight({gates,centers}|null)` lets the host
   // light the matching rows in the data panels (the reverse direction).
-  let highlighted = null;
-  let pinned = null;
+  let highlighted = null; // change-detection token
+  let pinned = null;       // { kind:'gate'|'center', id } | null
+  const tokenOf = (sel) => sel ? `${sel.kind}:${sel.id}` : null;
 
-  function litGatesFor(gateNum) {
-    const lit = new Set([gateNum]);
-    for (const ch of GATE_CHANNELS[gateNum] || []) {
-      if (definedChannelKeys.has(ch.gates.join('-'))) ch.gates.forEach(g => lit.add(g));
+  function litFor(sel) {
+    const gates = new Set();
+    const centers = new Set();
+    if (!sel) return { gates, centers };
+    if (sel.kind === 'gate') {
+      gates.add(sel.id);
+      for (const ch of GATE_CHANNELS[sel.id] || []) {
+        if (definedChannelKeys.has(ch.gates.join('-'))) ch.gates.forEach(g => gates.add(g));
+      }
+      for (const g of gates) { const ck = GATES[g]?.center; if (ck) centers.add(ck); }
+    } else if (sel.kind === 'center') {
+      centers.add(sel.id);
+      for (const g of activeGates) { if (GATES[g]?.center === sel.id) gates.add(g); }
     }
-    return lit;
+    return { gates, centers };
   }
 
-  function renderHighlight(gateNum) {
+  function renderHighlight(sel) {
     for (const node of Object.values(gatePathEls)) node.classList.remove('bg-lit');
     for (const node of Object.values(gateCircleEls)) node.classList.remove('bg-lit');
     for (const node of Object.values(centerPathEls)) node.classList.remove('bg-lit');
-    if (gateNum == null) { svg.classList.remove('bg-dimmed'); return null; }
+    if (!sel) { svg.classList.remove('bg-dimmed'); return { gates: [], centers: [] }; }
     svg.classList.add('bg-dimmed');
-    const lit = litGatesFor(gateNum);
-    for (const g of lit) {
+    const { gates, centers } = litFor(sel);
+    for (const g of gates) {
       gatePathEls[g]?.classList.add('bg-lit');
       gateCircleEls[g]?.classList.add('bg-lit');
-      const ck = GATES[g]?.center;
-      if (ck) centerPathEls[ck]?.classList.add('bg-lit');
     }
-    return lit;
+    for (const ck of centers) centerPathEls[ck]?.classList.add('bg-lit');
+    return { gates: [...gates], centers: [...centers] };
+  }
+
+  function applySelection(sel) {
+    const tok = tokenOf(sel);
+    if (highlighted === tok) return;
+    highlighted = tok;
+    const lit = renderHighlight(sel);
+    opts.onHighlight?.(sel ? lit : null);
   }
 
   function highlightGate(gateNum) {
-    const target = gateNum == null ? pinned : gateNum;
-    if (highlighted === target) return;
-    highlighted = target;
-    const lit = renderHighlight(target);
-    opts.onHighlight?.(lit ? [...lit] : null);
+    applySelection(gateNum == null ? pinned : { kind: 'gate', id: gateNum });
+  }
+  function highlightCenter(centerKey) {
+    applySelection(centerKey == null ? pinned : { kind: 'center', id: centerKey });
   }
 
-  // Keep a gate lit independent of hover (its detail card is open).
-  function setPinned(gateNum) {
-    pinned = gateNum;
-    highlighted = null; // force the next call to re-render
-    highlightGate(null); // resolves to the pinned gate (or clears)
+  // Keep a selection lit independent of hover (its detail card is open).
+  function setPinned(sel) {
+    pinned = sel; // { kind, id } | null
+    highlighted = '__force__'; // force the next call to re-render
+    applySelection(pinned);
   }
 
   // ---------- Tooltip + events ----------
@@ -356,6 +385,15 @@ export function renderBodygraph(container, chart, opts = {}) {
         (channelNote ? `<div class="bg-tt-channel">${channelNote}</div>` : '');
     }
 
+    function centerTooltipText(centerKey) {
+      const dn = CENTER_DISPLAY[centerKey] || centerKey;
+      const defined = definedCenters.has(centerKey);
+      const count = [...activeGates].filter(g => GATES[g]?.center === centerKey).length;
+      return `<strong>${dn} Center</strong>` +
+        `<div class="bg-tt-channel">${defined ? 'Defined — consistent energy you radiate' : 'Open — you take this energy in'}` +
+        (count ? ` · ${count} active gate${count === 1 ? '' : 's'}` : '') + `</div>`;
+    }
+
     function moveTooltip(evt) {
       const rect = container.getBoundingClientRect();
       tooltip.style.left = `${evt.clientX - rect.left + 12}px`;
@@ -366,34 +404,47 @@ export function renderBodygraph(container, chart, opts = {}) {
       // Touch taps fire a synthetic hover that would leave a tooltip stuck and
       // double up with the click → detail. On touch we let the tap do the work.
       if (evt.pointerType === 'touch') return;
-      const target = evt.target.closest('[data-gate]');
-      if (!target) return;
-      const gateNum = parseInt(target.getAttribute('data-gate'));
-      highlightGate(gateNum);
-      tooltip.innerHTML = tooltipText(gateNum);
-      tooltip.style.display = 'block';
-      moveTooltip(evt);
+      const gateEl = evt.target.closest('[data-gate]');
+      if (gateEl) {
+        const gateNum = parseInt(gateEl.getAttribute('data-gate'));
+        highlightGate(gateNum);
+        tooltip.innerHTML = tooltipText(gateNum);
+        tooltip.style.display = 'block';
+        moveTooltip(evt);
+        return;
+      }
+      const centerEl = evt.target.closest('[data-center]');
+      if (centerEl) {
+        const key = centerEl.getAttribute('data-center');
+        highlightCenter(key);
+        tooltip.innerHTML = centerTooltipText(key);
+        tooltip.style.display = 'block';
+        moveTooltip(evt);
+      }
     });
     svg.addEventListener('pointermove', (evt) => {
       if (tooltip.style.display === 'block') moveTooltip(evt);
     });
     svg.addEventListener('pointerout', (evt) => {
-      if (!evt.relatedTarget || !svg.contains(evt.relatedTarget) || !evt.relatedTarget.closest('[data-gate]')) {
-        highlightGate(null);
+      const rt = evt.relatedTarget;
+      const stayingOnTarget = rt && svg.contains(rt) && (rt.closest('[data-gate]') || rt.closest('[data-center]'));
+      if (!stayingOnTarget) {
+        highlightGate(null); // reverts to the pinned selection (or clears)
         tooltip.style.display = 'none';
       }
     });
     svg.addEventListener('click', (evt) => {
-      const target = evt.target.closest('[data-gate]');
-      if (target && opts.onGateClick) opts.onGateClick(parseInt(target.getAttribute('data-gate')));
+      const gateEl = evt.target.closest('[data-gate]');
+      if (gateEl && opts.onGateClick) { opts.onGateClick(parseInt(gateEl.getAttribute('data-gate'))); return; }
+      const centerEl = evt.target.closest('[data-center]');
+      if (centerEl && opts.onCenterClick) opts.onCenterClick(centerEl.getAttribute('data-center'));
     });
     svg.addEventListener('keydown', (evt) => {
       if (evt.key !== 'Enter' && evt.key !== ' ') return;
-      const target = evt.target.closest('[data-gate]');
-      if (target && opts.onGateClick) {
-        evt.preventDefault();
-        opts.onGateClick(parseInt(target.getAttribute('data-gate')));
-      }
+      const gateEl = evt.target.closest('[data-gate]');
+      if (gateEl && opts.onGateClick) { evt.preventDefault(); opts.onGateClick(parseInt(gateEl.getAttribute('data-gate'))); return; }
+      const centerEl = evt.target.closest('[data-center]');
+      if (centerEl && opts.onCenterClick) { evt.preventDefault(); opts.onCenterClick(centerEl.getAttribute('data-center')); }
     });
 
     container.appendChild(tooltip);
@@ -445,7 +496,7 @@ export function renderBodygraph(container, chart, opts = {}) {
     container.appendChild(svg);
   }
 
-  return { highlightGate, setPinned };
+  return { highlightGate, highlightCenter, setPinned };
 }
 
 export default renderBodygraph;
