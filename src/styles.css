@@ -908,6 +908,11 @@ body {
 .bodygraph-svg .bg-gate-path,
 .bodygraph-svg .bg-gate-circle { transition: opacity 0.12s; }
 
+/* Relational highlight reaches the centers too: when a gate (and its channel)
+   lights up, the center(s) it touches stay lit while the rest settle back. */
+.bodygraph-svg .bg-center { transition: opacity 0.12s; }
+.bodygraph-svg.bg-dimmed .bg-center:not(.bg-lit) { opacity: 0.5; }
+
 .bg-tooltip {
   position: absolute;
   z-index: 50;
@@ -971,6 +976,9 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .bg-reveal, .bg-reveal-paths { animation: none; }
+  .bodygraph-svg .bg-gate-path,
+  .bodygraph-svg .bg-gate-circle,
+  .bodygraph-svg .bg-center { transition: none; }
 }
 
 /* =============================================
@@ -1494,6 +1502,31 @@ body {
 
 .foundation-clickable { cursor: pointer; transition: background 0.1s; }
 .foundation-clickable:hover { background: var(--accent-soft); }
+
+/* Reverse highlight: a data row lit from the bodygraph (and vice-versa). The
+   same soft accent the rows use on hover, so the link reads as one gesture. */
+.row-lit { transition: background 0.12s, box-shadow 0.12s; }
+.gate-item.row-lit,
+.gate-pill.row-lit,
+.channel-item.row-lit,
+.foundation-clickable.row-lit {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.planet-cell.row-lit {
+  background: var(--accent-soft);
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--accent);
+}
+@media (prefers-reduced-motion: reduce) { .row-lit { transition: none; } }
+
+/* Small phones: the 6-column planet table can't hold its fixed columns under
+   ~360px, so drop the Color·Tone·Base sub-cells (advanced detail) and keep the
+   gate.line · glyph · name · gate.line spine, which always fits. */
+@media (max-width: 480px) {
+  .planet-table-row { grid-template-columns: auto 20px 1fr auto; gap: 5px; font-size: 12.5px; }
+  .planet-cell-sub { display: none; }
+}
 
 /* =============================================
    Transit layout

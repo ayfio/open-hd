@@ -137,9 +137,30 @@ export function rerenderBodygraph(transitGates = null) {
   const container = document.getElementById('bodygraph-container');
   bodygraphApi = renderBodygraph(container, current.chart, {
     onGateClick: showGateDetail,
+    onHighlight: highlightPanelRows,
     transitGates: transitGates || undefined
   });
   return bodygraphApi;
+}
+
+// Reverse direction of the bodygraph's relational highlight: when a gate (and
+// its channel) lights up on the graph, light the matching rows in the data
+// panels so the chart and the lists read as one focused object.
+function highlightPanelRows(gates) {
+  document.querySelectorAll('.row-lit').forEach(el => el.classList.remove('row-lit'));
+  if (!gates || !gates.length) return;
+  for (const g of gates) {
+    document
+      .querySelectorAll(`#panel-content [data-gate="${g}"], #foundation-panel [data-gate="${g}"], #gate-detail [data-gate="${g}"]`)
+      .forEach(el => el.classList.add('row-lit'));
+  }
+}
+
+// Forward direction: hovering a data row lights its gate(s) on the bodygraph.
+// Mouse/pen only — on touch the tap opens the detail (which pins the gate).
+function wireRowHover(el, gateNum) {
+  el.addEventListener('pointerenter', (e) => { if (e.pointerType !== 'touch') bodygraphApi?.highlightGate?.(gateNum); });
+  el.addEventListener('pointerleave', (e) => { if (e.pointerType !== 'touch') bodygraphApi?.highlightGate?.(null); });
 }
 
 function renderFoundation(chart, sensitivity = null, birth = null) {
@@ -322,7 +343,14 @@ export function showGateDetail(gateNum) {
     </div>
   `;
   detail.classList.remove('hidden');
-  detail.querySelector('.gate-detail-close').addEventListener('click', () => detail.classList.add('hidden'));
+  // Keep this gate lit on the bodygraph the whole time its card is open, so the
+  // chart and the reading stay tethered (whether the click came from the graph
+  // or from a data row).
+  bodygraphApi?.setPinned?.(gateNum);
+  detail.querySelector('.gate-detail-close').addEventListener('click', () => {
+    detail.classList.add('hidden');
+    bodygraphApi?.setPinned?.(null);
+  });
   detail.querySelectorAll('.lens-switch button').forEach(btn => btn.addEventListener('click', () => {
     currentLens = btn.dataset.lens;
     detail.querySelectorAll('.lens-switch button').forEach(b => b.classList.toggle('active', b.dataset.lens === currentLens));
@@ -411,7 +439,7 @@ function renderChannelsPanel(container) {
     const key = `${ch.gates[0]}-${ch.gates[1]}`;
     const desc = CHANNEL_DESCRIPTIONS[key];
     return `
-      <div class="channel-item" onclick="this.classList.toggle('expanded')">
+      <div class="channel-item" data-gate="${ch.gates[0]}" onclick="this.classList.toggle('expanded')">
         <div class="channel-name">
           ${esc(ch.name)} (${key})
           <span class="circuit-badge ${esc(ch.circuit)}">${esc(ch.circuit)}</span>
@@ -433,8 +461,12 @@ function renderChannelsPanel(container) {
       </div>
     ` : ''}
   `;
-  container.querySelectorAll('.gate-pill').forEach(btn =>
-    btn.addEventListener('click', () => showGateDetail(parseInt(btn.dataset.gate))));
+  container.querySelectorAll('.gate-pill').forEach(btn => {
+    btn.addEventListener('click', () => showGateDetail(parseInt(btn.dataset.gate)));
+    wireRowHover(btn, parseInt(btn.dataset.gate));
+  });
+  container.querySelectorAll('.channel-item[data-gate]').forEach(item =>
+    wireRowHover(item, parseInt(item.dataset.gate)));
 }
 
 function renderGatesPanel(container) {
@@ -463,8 +495,10 @@ function renderGatesPanel(container) {
     <p class="panel-intro"><span class="act-design">Red = Design</span> (unconscious, body) · <span class="act-personality">Black = Personality</span> (conscious, mind). Click a gate for detail.</p>
     ${gatesHtml}
   `;
-  container.querySelectorAll('.gate-item').forEach(item =>
-    item.addEventListener('click', () => showGateDetail(parseInt(item.dataset.gate))));
+  container.querySelectorAll('.gate-item').forEach(item => {
+    item.addEventListener('click', () => showGateDetail(parseInt(item.dataset.gate)));
+    wireRowHover(item, parseInt(item.dataset.gate));
+  });
 }
 
 function renderPlanetsPanel(container) {
@@ -509,6 +543,7 @@ function renderPlanetsPanel(container) {
     if (g) {
       cell.style.cursor = 'pointer';
       cell.addEventListener('click', () => showGateDetail(g));
+      wireRowHover(cell, g);
     }
   });
 }
@@ -589,8 +624,10 @@ function renderCrossPanel(container) {
     </div>
     ${geneKeysHtml}
   `;
-  container.querySelectorAll('.foundation-clickable').forEach(item =>
-    item.addEventListener('click', () => showGateDetail(parseInt(item.dataset.gate))));
+  container.querySelectorAll('.foundation-clickable').forEach(item => {
+    item.addEventListener('click', () => showGateDetail(parseInt(item.dataset.gate)));
+    wireRowHover(item, parseInt(item.dataset.gate));
+  });
 }
 
 export function getCurrentChart() {

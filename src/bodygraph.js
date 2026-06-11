@@ -160,6 +160,24 @@ export function renderBodygraph(container, chart, opts = {}) {
   pattern.appendChild(svgEl('rect', { width: '8', height: '8', fill: colors.personality }));
   pattern.appendChild(svgEl('rect', { width: '4', height: '8', fill: colors.design }));
   defs.appendChild(pattern);
+
+  // Whisper-subtle radial depth for defined centers: a slightly brighter core
+  // fading to the traditional hue at the edge, so a defined center reads as
+  // *energized* against a flat-white open one — without touching the hue identity.
+  const lighten = (hex, amt) => {
+    const n = parseInt(hex.slice(1), 16);
+    const r = Math.min(255, ((n >> 16) & 255) + Math.round(255 * amt));
+    const g = Math.min(255, ((n >> 8) & 255) + Math.round(255 * amt));
+    const b = Math.min(255, (n & 255) + Math.round(255 * amt));
+    return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+  };
+  const coreAmt = isDark() ? 0.13 : 0.17;
+  for (const [key, color] of Object.entries(centerColors())) {
+    const grad = svgEl('radialGradient', { id: `bg-cg-${key}`, cx: '0.5', cy: '0.36', r: '0.78' });
+    grad.appendChild(svgEl('stop', { offset: '0', 'stop-color': lighten(color, coreAmt) }));
+    grad.appendChild(svgEl('stop', { offset: '1', 'stop-color': color }));
+    defs.appendChild(grad);
+  }
   svg.appendChild(defs);
 
   const gateFill = (gateNum) => {
@@ -180,7 +198,7 @@ export function renderBodygraph(container, chart, opts = {}) {
     const path = svgEl('path', {
       d: pathData,
       fill: gateFill(gateNum),
-      opacity: isActive ? '1' : '0.4',
+      opacity: isActive ? '1' : '0.14',
       'data-gate': gateNum,
       class: 'bg-gate-path'
     });
@@ -191,6 +209,7 @@ export function renderBodygraph(container, chart, opts = {}) {
 
   // --- Centers (top-to-bottom order so the reveal animation flows down) ---
   const centerGroup = svgEl('g', { class: 'bg-centers' });
+  const centerPathEls = {};
   const CENTER_REVEAL_ORDER = ['Head', 'Ajna', 'Throat', 'G', 'Ego', 'Spleen', 'SolarPlexus', 'Sacral', 'Root'];
   CENTER_REVEAL_ORDER.forEach((shapeKey, i) => {
     const shapeData = CENTER_SHAPES[shapeKey];
@@ -199,7 +218,7 @@ export function renderBodygraph(container, chart, opts = {}) {
     const defined = definedCenters.has(centerKey);
     const path = svgEl('path', {
       d: shapeData.path,
-      fill: defined ? centerColors()[centerKey] : colors.undefinedCenter,
+      fill: defined ? `url(#bg-cg-${centerKey})` : colors.undefinedCenter,
       stroke: defined ? 'none' : colors.centerStroke,
       'stroke-width': '1.5',
       'data-center': centerKey,
@@ -209,6 +228,7 @@ export function renderBodygraph(container, chart, opts = {}) {
       path.classList.add('bg-reveal');
       path.style.animationDelay = `${i * 70}ms`;
     }
+    centerPathEls[centerKey] = path;
     centerGroup.appendChild(path);
   });
   svg.appendChild(centerGroup);
@@ -265,28 +285,52 @@ export function renderBodygraph(container, chart, opts = {}) {
   svg.appendChild(gateGroup);
 
   // ---------- Highlight machinery ----------
+  // One selected gate lights itself, its channel partner (when the channel is
+  // defined), and the center(s) it touches — and dims everything else, so the
+  // chart reads as one focused object. `pinned` keeps a clicked gate lit while
+  // its detail card is open; hovering another gate previews it, and pointer-out
+  // reverts to the pinned gate. `opts.onHighlight(gates|null)` lets the host
+  // light the matching rows in the data panels (the reverse direction).
   let highlighted = null;
-  function setDim(dim) {
-    svg.classList.toggle('bg-dimmed', dim);
-  }
-  function highlightGate(gateNum) {
-    if (highlighted === gateNum) return;
-    // clear
-    for (const elList of [gatePathEls, gateCircleEls]) {
-      for (const node of Object.values(elList)) node.classList.remove('bg-lit');
-    }
-    highlighted = gateNum;
-    if (gateNum == null) { setDim(false); return; }
-    setDim(true);
+  let pinned = null;
+
+  function litGatesFor(gateNum) {
     const lit = new Set([gateNum]);
-    // light the full channel when the partner is also active
     for (const ch of GATE_CHANNELS[gateNum] || []) {
       if (definedChannelKeys.has(ch.gates.join('-'))) ch.gates.forEach(g => lit.add(g));
     }
+    return lit;
+  }
+
+  function renderHighlight(gateNum) {
+    for (const node of Object.values(gatePathEls)) node.classList.remove('bg-lit');
+    for (const node of Object.values(gateCircleEls)) node.classList.remove('bg-lit');
+    for (const node of Object.values(centerPathEls)) node.classList.remove('bg-lit');
+    if (gateNum == null) { svg.classList.remove('bg-dimmed'); return null; }
+    svg.classList.add('bg-dimmed');
+    const lit = litGatesFor(gateNum);
     for (const g of lit) {
       gatePathEls[g]?.classList.add('bg-lit');
       gateCircleEls[g]?.classList.add('bg-lit');
+      const ck = GATES[g]?.center;
+      if (ck) centerPathEls[ck]?.classList.add('bg-lit');
     }
+    return lit;
+  }
+
+  function highlightGate(gateNum) {
+    const target = gateNum == null ? pinned : gateNum;
+    if (highlighted === target) return;
+    highlighted = target;
+    const lit = renderHighlight(target);
+    opts.onHighlight?.(lit ? [...lit] : null);
+  }
+
+  // Keep a gate lit independent of hover (its detail card is open).
+  function setPinned(gateNum) {
+    pinned = gateNum;
+    highlighted = null; // force the next call to re-render
+    highlightGate(null); // resolves to the pinned gate (or clears)
   }
 
   // ---------- Tooltip + events ----------
@@ -319,6 +363,9 @@ export function renderBodygraph(container, chart, opts = {}) {
     }
 
     svg.addEventListener('pointerover', (evt) => {
+      // Touch taps fire a synthetic hover that would leave a tooltip stuck and
+      // double up with the click → detail. On touch we let the tap do the work.
+      if (evt.pointerType === 'touch') return;
       const target = evt.target.closest('[data-gate]');
       if (!target) return;
       const gateNum = parseInt(target.getAttribute('data-gate'));
@@ -373,8 +420,8 @@ export function renderBodygraph(container, chart, opts = {}) {
       row.appendChild(el('span', { class: 'bg-planet-glyph', text: PLANET_GLYPHS[planet] }));
       row.appendChild(el('span', { class: 'bg-planet-act', text: g ? `${g.gate}.${g.line}` : '—' }));
       if (g) {
-        row.addEventListener('pointerenter', () => highlightGate(g.gate));
-        row.addEventListener('pointerleave', () => highlightGate(null));
+        row.addEventListener('pointerenter', (e) => { if (e.pointerType !== 'touch') highlightGate(g.gate); });
+        row.addEventListener('pointerleave', (e) => { if (e.pointerType !== 'touch') highlightGate(null); });
         if (opts.onGateClick) {
           row.style.cursor = 'pointer';
           row.addEventListener('click', () => opts.onGateClick(g.gate));
@@ -398,7 +445,7 @@ export function renderBodygraph(container, chart, opts = {}) {
     container.appendChild(svg);
   }
 
-  return { highlightGate };
+  return { highlightGate, setPinned };
 }
 
 export default renderBodygraph;

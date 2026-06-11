@@ -83,6 +83,41 @@ await check('lens switcher shows the three traditions', async () => {
   await page.click('.lens-switch button[data-lens="hd"]'); // restore default
 });
 
+await check('relational highlight links chart ↔ data both ways + pins on click', async () => {
+  // Start clean: close any card a prior check left open and clear hover state.
+  await page.evaluate(() => document.querySelector('#gate-detail .gate-detail-close')?.click());
+  await page.click('.panel-tab[data-panel="gates"]');
+  await page.waitForSelector('.gate-item[data-gate="34"]', { timeout: 3000 });
+  // Dispatch the real handler events directly — deterministic, avoids
+  // mouse-trajectory/scroll quirks of a tall sticky-column layout.
+  const fire = (sel, type) => page.$eval(sel, (el, t) =>
+    el.dispatchEvent(new PointerEvent(t, { bubbles: true, pointerType: 'mouse' })), type);
+
+  // Forward: a Gates-panel row hover dims the graph and lights its gate.
+  await fire('.gate-item[data-gate="34"]', 'pointerenter');
+  await page.waitForTimeout(120);
+  const dimmed = await page.$eval('.bodygraph-svg', el => el.classList.contains('bg-dimmed'));
+  if (!dimmed) throw new Error('graph did not dim when hovering a data row');
+  const gateLit = await page.$eval('.bg-gate-path[data-gate="34"]', el => el.classList.contains('bg-lit'));
+  if (!gateLit) throw new Error('gate 34 path not lit from row hover');
+  await fire('.gate-item[data-gate="34"]', 'pointerleave');
+
+  // Reverse: a gate hover on the graph lights the matching panel row.
+  await fire('.bg-gate[data-gate="34"]', 'pointerover');
+  await page.waitForTimeout(120);
+  const rowLit = await page.$$eval('#panel-content [data-gate="34"].row-lit', els => els.length > 0);
+  if (!rowLit) throw new Error('panel row not lit from graph hover');
+
+  // Click pins the gate lit even after the pointer leaves the graph.
+  await page.click('.bg-gate[data-gate="34"]');
+  await fire('.bodygraph-svg', 'pointerout');
+  await page.waitForTimeout(120);
+  const pinned = await page.$eval('.bg-gate-path[data-gate="34"]', el => el.classList.contains('bg-lit'));
+  if (!pinned) throw new Error('clicked gate did not stay pinned-lit after pointer left');
+  // Close the card to restore a clean highlight state for later checks.
+  await page.click('#gate-detail .gate-detail-close');
+});
+
 await check('panel tabs switch content', async () => {
   for (const tab of ['planets', 'variable', 'cross', 'channels', 'gates', 'centers']) {
     await page.click(`.panel-tab[data-panel="${tab}"]`);
