@@ -4,34 +4,52 @@
   "compatibility_date": "2024-06-01",
   "compatibility_flags": ["nodejs_compat"],
   
+  // ✅ Статические файлы фронтенда (Vite build → dist/)
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": [
-      "/api/*", "/auth/*", "/oauth/*", "/mcp",
-      "/.well-known/*", "/og/*", "/chart.svg"
+      "/api/*",
+      "/auth/*",
+      "/oauth/*",
+      "/mcp",
+      "/.well-known/*",
+      "/og/*",
+      "/chart.svg"
     ]
   },
   
+  // ✅ Бесплатный поддомен *.workers.dev
   "workers_dev": true,
   
+  // ❌ УДАЛЕНО: "limits" — НЕ поддерживается на Free tier (вызывало ошибку)
+  
+  // 🔽 ОПЦИОНАЛЬНО: D1 Database — имеет бесплатный лимит, но можно убрать если не нужен
+  // Если оставляете — убедитесь, что database_id реальный
+  /*
   "d1_databases": [{
     "binding": "DB",
     "database_name": "open-hd",
     "database_id": "e2175d43-d060-4ddf-b926-59ce70774da8"
   }],
+  */
   
+  // 🔽 ОПЦИОНАЛЬНО: KV Namespace — имеет бесплатный лимит, но можно убрать если не нужен
+  /*
   "kv_namespaces": [{
     "binding": "OAUTH_KV",
     "id": "ba46c0fc03a54b10af60fa38e73fda48"
   }],
+  */
   
-  "send_email": [{ "name": "SEND_EMAIL" }],
+  // ❌ УДАЛЕНО: send_email — ТОЛЬКО на Paid планах ($5/мес)
   
-  "rules": [{ "type": "Data", "globs": ["**/*.ttf", "**/*.woff", "**/*.woff2"], "fallthrough": true }],
+  // ✅ Правила для шрифтов (бесплатно)
+  "rules": [
+    { "type": "Data", "globs": ["**/*.ttf", "**/*.woff", "**/*.woff2"], "fallthrough": true }
+  ],
   
-  "observability": { "enabled": true },
-  
-  "limits": { "cpu_ms": 50 }
+  // ✅ Observability (бесплатно в базовом виде)
+  "observability": { "enabled": true }
 }
