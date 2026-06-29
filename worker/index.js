@@ -2,11 +2,7 @@
  * Open Human Design — Cloudflare Worker entry.
  *
  * The whole Worker is wrapped by workers-oauth-provider:
- *   /mcp          → the MCP connector (OAuth-protected; props.userId scopes
- *                   every tool — saved names, metering, the works). Decision
- *                   2026-06-06: no anonymous MCP — it would undercut the
- *                   metering model, and the zero-auth path for power users
- *                   is the engine's own stdio MCP (npx natalengine-mcp).
+ *   /mcp          → the MCP connector (OAuth-protected)
  *   /oauth/token, /oauth/register, /.well-known/* → handled by the provider
  *   everything else → defaultHandler below:
  *     /authorize    → sign-in + consent pages (worker/oauth-ui.js)
@@ -25,6 +21,7 @@ import { handleAuthorize, verifyInterstitial } from './oauth-ui.js';
 import { handleOgImage, handleChartSvg, rewriteShareMeta } from './og.js';
 import { handleSeoPage, handleSitemap, handleRobots } from './seo.js';
 
+// 🔐 MCP CORS — открытый для всех MCP-клиентов
 const MCP_CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
@@ -32,18 +29,28 @@ const MCP_CORS = {
   'Access-Control-Expose-Headers': 'Mcp-Session-Id'
 };
 
-// /api CORS: credentialed, allowlisted origins only (Vite dev against
-// wrangler dev; production is same-origin and never needs these).
+// 🌐 API CORS: credentialed, allowlisted origins only
+// Добавлен ejo.neocities.org для фронтенда на Neocities
 const API_ORIGINS = new Set([
   'http://localhost:5174',
   'http://localhost:8788',
   'https://openhumandesign.com',
-  'https://www.openhumandesign.com'
+  'https://www.openhumandesign.com',
+  'https://ejo.neocities.org'  // ← ДОБАВЛЕНО: ваш фронтенд на Neocities
 ]);
+
+// Проверка origin с поддержкой wildcard для *.neocities.org (опционально)
+function isAllowedOrigin(origin) {
+  if (!origin) return false;
+  if (API_ORIGINS.has(origin)) return true;
+  // Опционально: разрешить любые *.neocities.org поддомены
+  // return origin.endsWith('.neocities.org');
+  return false;
+}
 
 function apiCors(request) {
   const origin = request.headers.get('Origin');
-  if (!origin || !API_ORIGINS.has(origin)) return {};
+  if (!isAllowedOrigin(origin)) return {};
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -83,6 +90,8 @@ const defaultHandler = {
 
     if (pathname.startsWith('/api/')) {
       const cors = apiCors(request);
+      
+      // Preflight CORS запрос
       if (request.method === 'OPTIONS') {
         return new Response(null, { status: 204, headers: cors });
       }
@@ -103,15 +112,13 @@ const defaultHandler = {
       return withHeaders(Response.json({ error: 'not found' }, { status: 404 }), cors);
     }
 
-    // SEO: server-rendered reference pages (crawlable HTML the SPA can't give).
+    // SEO: server-rendered reference pages
     if (pathname === '/sitemap.xml') return handleSitemap();
     if (pathname === '/robots.txt') return handleRobots();
     const seoPage = await handleSeoPage(request);
     if (seoPage) return seoPage;
 
-    // Static assets (SPA) — wrangler serves env.ASSETS with SPA fallback.
-    // Share links (/?d=…) get their OpenGraph tags rewritten per-chart so
-    // unfurls show the person, not the generic site card.
+    // Static assets (SPA) — wrangler serves env.ASSETS with SPA fallback
     const assetResponse = await env.ASSETS.fetch(request);
     if (url.searchParams.has('d') && (assetResponse.headers.get('content-type') || '').includes('text/html')) {
       return rewriteShareMeta(assetResponse, url);
@@ -125,7 +132,7 @@ const mcpHandler = {
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: MCP_CORS });
     }
-    return withHeaders(await handleMcpRequest(request, env, ctx.props), MCP_CORS);
+    return withHeaders(await handleMcpRequest(request, env, ctx?.props), MCP_CORS);
   }
 };
 
