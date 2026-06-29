@@ -30,13 +30,10 @@ const MCP_CORS = {
 };
 
 // 🌐 API CORS: credentialed, allowlisted origins only
-// Добавлен ejo.neocities.org для фронтенда на Neocities
 const API_ORIGINS = new Set([
   'http://localhost:5174',
   'http://localhost:8788',
-  'https://openhumandesign.com',
-  'https://www.openhumandesign.com',
-  'https://ejo.neocities.org'  // ← ДОБАВЛЕНО: ваш фронтенд на Neocities
+  'https://ejo.neocities.org'  // фронтенд на Neocities
 ]);
 
 // Проверка origin с поддержкой wildcard для *.neocities.org (опционально)
