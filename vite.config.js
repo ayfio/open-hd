@@ -1,10 +1,12 @@
+// vite.config.js — проверьте или создайте
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  // Relative base so the build works at any mount path (GitHub Pages
-  // serves at /open-hd/, local preview at /).
   base: './',
   build: {
-    outDir: 'dist'
-  }
+    outDir: 'dist',
+    emptyOutDir: true,
+    minify: true,
+    sourcemap: false, 
+  },
 });
