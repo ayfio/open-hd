@@ -1,232 +1,25 @@
 /**
- * Optional account sync — the SyncStore side of the PeopleStore seam.
- *
- * Design (docs/PLATFORM.md):/**
- * Cloudflare Worker Sync — PeopleStore synchronization layer.
- * 
- * Design:
- * - localStorage is the source of truth; Worker provides durable backup + cross-device sync.
- * - Token-based auth: JWT stored in localStorage, sent via Authorization header.
- * - Dirty-set tracking: local edits marked dirty, pushed with LWW resolution on Worker.
+ * Optional account sync — Cloudflare Worker compatible
  */
 
 import { getProfiles, saveProfile, deleteProfile } from 'natalengine';
 import { getAiAccess, setAiAccess } from './people.js';
 
-// 🔑 Единственный источник API — URL вашего Cloudflare Worker
-const WORKER_URL = import.meta.env.VITE_OHD_WORKER_URL;
+// API base: в Worker передаётся через env, в браузере — через import.meta.env
+const API = typeof import.meta !== 'undefined' 
+  ? import.meta.env.VITE_OHD_API_BASE 
+  : undefined;
 
-const AUTH_TOKEN_KEY = 'ohd-auth-token';
 const CURSOR_KEY = 'ohd-sync-cursor';
 const DIRTY_KEY = 'ohd-sync-dirty';
 const DELETES_KEY = 'ohd-sync-deletes';
 
-// Синхронизация доступна только если задан WORKER_URL
-export const syncAvailable = !!WORKER_URL;
+export const syncAvailable = !!API;
 
 let syncing = false;
 let onChange = null;
 
-// --- Auth helpers ----------------------------------------------------------
-function getToken() {
-  if (typeof localStorage === 'undefined') return null;
-  try { return localStorage.getItem(AUTH_TOKEN_KEY); } 
-  catch { return null; }
-}
-
-function setToken(token) {
-  if (typeof localStorage === 'undefined') return;
-  try {
-    if (token) localStorage.setItem(AUTH_TOKEN_KEY, token);
-    else localStorage.removeItem(AUTH_TOKEN_KEY);
-  } catch { /* private mode */ }
-}
-
-// --- API client (Worker-only) ----------------------------------------------
-async function api(path, options = {}) {
-  if (!WORKER_URL) {
-    throw new Error('VITE_OHD_WORKER_URL not configured — sync disabled');
-  }
-  
-  const token = getToken();
-  const headers = {
-    'content-type': 'application/json',
-    ...(token && { 'authorization': `Bearer ${token}` }),
-    ...(options.headers || {})
-  };
-
-  const res = await fetch(`${WORKER_URL}${path}`, {
-    ...options,
-    headers,
-    body: options.body ? JSON.stringify(options.body) : undefined
-  });
-
-  // 401 = токен истёк/невалиден
-  if (res.status === 401) {
-    setToken(null);
-    throw new Error('AUTH_REQUIRED');
-  }
-  
-  // 404 = эндпоинт не реализован на Worker'е
-  if (res.status === 404) {
-    console.warn(`Endpoint ${path} not found at ${WORKER_URL}`);
-    throw new Error('SYNC_UNAVAILABLE');
-  }
-  
-  if (!res.ok) {
-    throw new Error(`${path}: ${res.status} ${res.statusText}`);
-  }
-  
-  return res.json();
-}
-
-// --- Public auth API -------------------------------------------------------
-export async function getSessionUser() {
-  if (!syncAvailable) return null;
-  try {
-    const data = await api('/api/auth/get-session');
-    return data?.user || null;
-  } catch (e) {
-    // Грациозная обработка: если синхронизация недоступна — просто null
-    if (e.message === 'AUTH_REQUIRED' || e.message === 'SYNC_UNAVAILABLE') {
-      return null;
-    }
-    console.warn('getSessionUser error:', e.message);
-    return null;
-  }
-}
-
-export async function requestMagicLink(email) {
-  if (!syncAvailable) {
-    throw new Error('Sync not configured — set VITE_OHD_WORKER_URL');
-  }
-  return api('/api/auth/magic-link', {
-    method: 'POST',
-    body: { email, callbackURL: '/' }
-  });
-}
-
-export async function completeSignIn(token) {
-  const data = await api('/api/auth/complete', {
-    method: 'POST',
-    body: { token }
-  });
-  if (data?.authToken) {
-    setToken(data.authToken);
-    return data.user;
-  }
-  throw new Error('Invalid sign-in token');
-}
-
-export async function signOut() {
-  setToken(null);
-  // Опционально: отозвать токен на сервере
-  try { await api('/api/auth/revoke', { method: 'POST' }); } 
-  catch { /* best effort */ }
-}
-
-// --- Sync engine -----------------------------------------------------------
-function profileToWire(p) {
-  return {
-    id: p.id,
-    name: p.name,
-    birthDate: p.birthDate,
-    birthTime: p.birthTime,
-    timeUnknown: !!p.timeUnknown,
-    location: p.location || null,
-    aiAccess: getAiAccess(p.id),
-    updatedAt: p.updatedAt,
-    createdAt: p.createdAt
-  };
-}
-
-export async function syncNow({ firstMerge = false } = {}) {
-  // Нет токена = не авторизован = не синхронизируем
-  if (!syncAvailable || !getToken() || syncing) return false;
-  
-  syncing = true;
-  
-  try {
-    const profiles = getProfiles();
-    const dirty = firstMerge 
-      ? new Set(profiles.map(p => p.id)) 
-      : readSet(DIRTY_KEY);
-    const deletes = readSet(DELETES_KEY);
-
-    // Формируем изменения: dirty профили + удалённые (tombstones)
-    const changes = [
-      ...profiles.filter(p => dirty.has(p.id)).map(profileToWire),
-      ...[...deletes].map(id => ({ 
-        id, 
-        deletedAt: new Date().toISOString(), 
-        updatedAt: new Date().toISOString() 
-      }))
-    ];
-    
-    // Если нет изменений и не первый мердж — пропускаем запрос
-    if (changes.length === 0 && !firstMerge) {
-      return true;
-    }
-    
-    const since = firstMerge ? '' : (readSet(CURSOR_KEY) || '');
-
-    const data = await api('/api/sync', {
-      method: 'POST',
-      body: { since, changes }
-    });
-
-    // Очистка: что отправили — больше не dirty
-    writeSet(DIRTY_KEY, new Set());
-    writeSet(DELETES_KEY, new Set());
-
-    // Применяем remote deltas (пропускаем то, что стало dirty снова)
-    const stillDirty = readSet(DIRTY_KEY);
-    let applied = 0;
-    
-    for (const c of data.changes || []) {
-      if (stillDirty.has(c.id)) continue;
-      
-      if (c.deletedAt) {
-        deleteProfile(c.id);
-        applied++;
-        continue;
-      }
-      
-      saveProfile({
-        id: c.id,
-        name: c.name,
-        birthDate: c.birthDate,
-        birthTime: c.birthTime,
-        timeUnknown: c.timeUnknown,
-        location: c.location
-      });
-      setAiAccess(c.id, !!c.aiAccess);
-      applied++;
-    }
-
-    // Сохраняем cursor для следующего sync
-    try { 
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(CURSOR_KEY, data.now); 
-      }
-    } catch { /* private mode */ }
-    
-    // Уведомляем UI о применённых изменениях
-    if (applied && onChange) onChange();
-    return true;
-    
-  } catch (e) {
-    // Не шумим в консоль при ожидаемых ошибках
-    if (e.message !== 'AUTH_REQUIRED' && e.message !== 'SYNC_UNAVAILABLE') {
-      console.warn('sync failed (will retry):', e.message);
-    }
-    return false;
-  } finally {
-    syncing = false;
-  }
-}
-
-// --- Utility functions -----------------------------------------------------
+// --- tiny persisted sets -----------------------------------------------
 function readSet(key) {
   if (typeof localStorage === 'undefined') return new Set();
   try { return new Set(JSON.parse(localStorage.getItem(key) || '[]')); } 
@@ -240,88 +33,6 @@ function writeSet(key, set) {
 }
 
 export function markDirty(id) {
-  if (!syncAvailable || !id || !getToken()) return;
-  const dirty = readSet(DIRTY_KEY);
-  dirty.add(id);
-  writeSet(DIRTY_KEY, dirty);
-  scheduleSync();
-}
-
-export function markDeleted(id) {
-  if (!syncAvailable || !id || !getToken()) return;
-  const deletes = readSet(DELETES_KEY);
-  deletes.add(id);
-  writeSet(DELETES_KEY, deletes);
-  
-  // Удаляем из dirty: не пушим правки для удалённых
-  const dirty = readSet(DIRTY_KEY);
-  dirty.delete(id);
-  writeSet(DIRTY_KEY, dirty);
-  scheduleSync();
-}
-
-// --- Background sync -------------------------------------------------------
-let timer = null;
-
-export function scheduleSync(delay = 2000) {
-  if (!syncAvailable || !getToken()) return;
-  clearTimeout(timer);
-  timer = setTimeout(() => syncNow(), delay);
-}
-
-export function startSync({ onRemoteChange } = {}) {
-  if (!syncAvailable) {
-    console.debug('Sync disabled: set VITE_OHD_WORKER_URL in .env');
-    return;
-  }
-  
-  onChange = onRemoteChange || null;
-  
-  // Первый мердж если нет cursor'а
-  const hasCursor = typeof localStorage !== 'undefined' 
-    ? localStorage.getItem(CURSOR_KEY) !== null 
-    : false;
-    
-  syncNow({ firstMerge: !hasCursor });
-  
-  // Синхронизация при возврате фокуса в окно
-  if (typeof window !== 'undefined') {
-    window.addEventListener('focus', () => scheduleSync(200));
-    window.addEventListener('online', () => scheduleSync(500));
-  }
-}
- * - localStorage stays the live source of truth; the server is durable
- *   backup + cross-device fan-out.
- * - Dirty-set tracking: UI-path saves/deletes mark ids dirty; sync pushes
- *   dirty records (LWW on the server), pulls deltas, applies remote rows
- *   that aren't locally dirty. Convergent and boring on purpose.
- * - Enabled only when the build has an API base (VITE_OHD_API_BASE) AND
- *   the user signed in. Static self-hosted builds: all of this is dead code.
- */
-
-import { getProfiles, saveProfile, deleteProfile } from 'natalengine';
-import { getAiAccess, setAiAccess } from './people.js';
-
-const API = import.meta.env.VITE_OHD_API_BASE; // undefined = sync disabled
-const CURSOR_KEY = 'ohd-sync-cursor';
-const DIRTY_KEY = 'ohd-sync-dirty';     // ids with unpushed local edits
-const DELETES_KEY = 'ohd-sync-deletes'; // tombstones awaiting push
-
-export const syncAvailable = API !== undefined;
-const base = API || ''; // '' = same origin
-
-let syncing = false;
-let onChange = null; // callback: remote changes were applied → re-render
-
-// --- tiny persisted sets -----------------------------------------------
-function readSet(key) {
-  try { return new Set(JSON.parse(localStorage.getItem(key) || '[]')); } catch { return new Set(); }
-}
-function writeSet(key, set) {
-  try { localStorage.setItem(key, JSON.stringify([...set])); } catch { /* private mode */ }
-}
-
-export function markDirty(id) {
   if (!syncAvailable || !id) return;
   const dirty = readSet(DIRTY_KEY);
   dirty.add(id);
@@ -340,36 +51,53 @@ export function markDeleted(id) {
   scheduleSync();
 }
 
-// --- auth ----------------------------------------------------------------
-async function api(path, options = {}) {
+// --- auth (Worker-compatible) ------------------------------------------
+async function api(path, options = {}, env = null) {
+  const base = env?.API_BASE || API || '';
+  
+  // Подготовка заголовков: в Worker берём токен из env/request, в браузере — из cookies
+  const headers = {
+    'content-type': 'application/json',
+    ...(options.headers || {})
+  };
+  
+  // Если есть токен в env (Worker) — добавляем его
+  if (env?.AUTH_TOKEN) {
+    headers['authorization'] = `Bearer ${env.AUTH_TOKEN}`;
+  }
+  
   const res = await fetch(`${base}${path}`, {
-    credentials: 'include',
-    headers: { 'content-type': 'application/json' },
-    ...options
+    // credentials удаляем — в Workers не поддерживается
+    headers,
+    ...options,
+    body: options.body ? JSON.stringify(options.body) : undefined
   });
+  
   if (!res.ok) throw new Error(`${path}: ${res.status}`);
   return res.json();
 }
 
-export async function getSessionUser() {
+export async function getSessionUser(env = null) {
   if (!syncAvailable) return null;
   try {
-    const data = await api('/api/auth/get-session');
+    const data = await api('/api/auth/get-session', {}, env);
     return data?.user || null;
   } catch {
     return null;
   }
 }
 
-export async function requestMagicLink(email) {
+export async function requestMagicLink(email, env = null) {
   return api('/api/auth/sign-in/magic-link', {
     method: 'POST',
-    body: JSON.stringify({ email, callbackURL: '/' })
-  });
+    body: { email, callbackURL: '/' }
+  }, env);
 }
 
-export async function signOut() {
-  try { await api('/api/auth/sign-out', { method: 'POST', body: '{}' }); } catch { /* best effort */ }
+export async function signOut(env = null) {
+  try { 
+    await api('/api/auth/sign-out', { method: 'POST', body: {} }, env); 
+  } catch { /* best effort */ }
 }
 
 // --- sync engine -----------------------------------------------------------
@@ -387,37 +115,39 @@ function profileToWire(p) {
   };
 }
 
-/**
- * One full sync round: push dirty + tombstones, pull deltas, apply.
- * First sign-in: every local person is dirty (the one-time merge).
- */
-export async function syncNow({ firstMerge = false } = {}) {
+export async function syncNow({ firstMerge = false, env = null } = {}) {
   if (!syncAvailable || syncing) return false;
   syncing = true;
+  
   try {
     const profiles = getProfiles();
-    const dirty = firstMerge ? new Set(profiles.map(p => p.id)) : readSet(DIRTY_KEY);
+    const dirty = firstMerge 
+      ? new Set(profiles.map(p => p.id)) 
+      : readSet(DIRTY_KEY);
     const deletes = readSet(DELETES_KEY);
 
     const changes = [
       ...profiles.filter(p => dirty.has(p.id)).map(p => profileToWire(p)),
-      ...[...deletes].map(id => ({ id, deletedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }))
+      ...[...deletes].map(id => ({ 
+        id, 
+        deletedAt: new Date().toISOString(), 
+        updatedAt: new Date().toISOString() 
+      }))
     ];
-    const since = firstMerge ? '' : (localStorage.getItem(CURSOR_KEY) || '');
+    
+    const since = firstMerge ? '' : (readSet(CURSOR_KEY) || '');
 
     const data = await api('/api/sync', {
       method: 'POST',
-      body: JSON.stringify({ since, changes })
-    });
+      body: { since, changes }
+    }, env);
 
-    // Push succeeded — clear what we sent
     writeSet(DIRTY_KEY, new Set());
     writeSet(DELETES_KEY, new Set());
 
-    // Apply remote deltas. Skip rows we just marked dirty again mid-flight
-    // (local edits win until the next push) and rows we deleted locally.
     const stillDirty = readSet(DIRTY_KEY);
     let applied = 0;
+    
     for (const c of data.changes || []) {
       if (stillDirty.has(c.id)) continue;
       if (c.deletedAt) {
@@ -437,9 +167,15 @@ export async function syncNow({ firstMerge = false } = {}) {
       applied++;
     }
 
-    try { localStorage.setItem(CURSOR_KEY, data.now); } catch { /* private mode */ }
+    try { 
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(CURSOR_KEY, data.now); 
+      }
+    } catch { /* private mode */ }
+    
     if (applied && onChange) onChange();
     return true;
+    
   } catch (e) {
     console.warn('sync failed (will retry):', e.message);
     return false;
@@ -455,11 +191,18 @@ export function scheduleSync(delay = 2000) {
   timer = setTimeout(() => syncNow(), delay);
 }
 
-/** Start background sync: first merge, then on focus + after writes. */
-export function startSync({ onRemoteChange } = {}) {
+export function startSync({ onRemoteChange, env = null } = {}) {
   if (!syncAvailable) return;
   onChange = onRemoteChange || null;
-  const merged = localStorage.getItem(CURSOR_KEY) !== null;
-  syncNow({ firstMerge: !merged });
-  window.addEventListener('focus', () => scheduleSync(200));
+  
+  let merged = false;
+  if (typeof localStorage !== 'undefined') {
+    merged = localStorage.getItem(CURSOR_KEY) !== null;
+  }
+  
+  syncNow({ firstMerge: !merged, env });
+  
+  if (typeof window !== 'undefined') {
+    window.addEventListener('focus', () => scheduleSync(200));
+  }
 }
